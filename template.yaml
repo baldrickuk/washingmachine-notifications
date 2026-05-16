@@ -16,19 +16,24 @@ Parameters:
     Type: String
     Default: bunny
     Description: Animal photo to reward the recipient with on confirmation (bunny, cat, dog, fox)
+  TwilioEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Set to true to enable Twilio SMS
   TwilioAccountSid:
     Type: String
-    Default: ""
+    Default: "unused"
     Description: Twilio Account SID (optional — SMS disabled if blank)
   TwilioAuthToken:
     Type: String
-    Default: ""
+    Default: "unused"
     NoEcho: true
-    Description: Twilio Auth Token (optional — SMS disabled if blank)
+    Description: Twilio Auth Token (optional)
   TwilioFromNumber:
     Type: String
-    Default: ""
-    Description: Twilio phone number to send SMS from in E.164 format (optional — SMS disabled if blank)
+    Default: "unused"
+    Description: Twilio phone number to send SMS from in E.164 format (optional)
   WhatsAppPhoneNumberId:
     Type: String
     Default: ""
@@ -65,6 +70,7 @@ Globals:
         TWILIO_ACCOUNT_SID: !Ref TwilioAccountSid
         TWILIO_AUTH_TOKEN: !Ref TwilioAuthToken
         TWILIO_FROM_NUMBER: !Ref TwilioFromNumber
+        TWILIO_ENABLED: !Ref TwilioEnabled
         WHATSAPP_PHONE_NUMBER_ID: !Ref WhatsAppPhoneNumberId
         WHATSAPP_ACCESS_TOKEN: !Ref WhatsAppAccessToken
         WHATSAPP_REMINDER_TEMPLATE: !Ref WhatsAppReminderTemplate

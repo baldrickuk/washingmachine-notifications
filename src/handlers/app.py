@@ -23,7 +23,7 @@ ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
 _TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 _TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
-TWILIO_ENABLED = bool(_TWILIO_SID and _TWILIO_TOKEN and TWILIO_FROM_NUMBER)
+TWILIO_ENABLED = os.environ.get("TWILIO_ENABLED", "false").lower() == "true"
 
 if TWILIO_ENABLED:
     from twilio.rest import Client as TwilioClient  # pylint: disable=import-error
