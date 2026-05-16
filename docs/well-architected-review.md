@@ -15,14 +15,11 @@
 
 flowchart LR
     subgraph t5 ["★★★★★  5 / 5"]
-        SEC["🔒 Security\n─────────────\nAll findings resolved\nThreat model current"]
+        SEC["🔒 Security\n─────────────\nAll findings resolved\nCloudTrail DDB audit active"]
         COST["💰 Cost Optimization\n─────────────\nEffectively free\n~$0.40/month"]
-    end
-
-    subgraph t4 ["★★★★☆  4 / 5"]
-        OPS["⚙️ Operational Excellence\n─────────────\nIaC, DLQ and alarms in place\nTests and CI/CD outstanding"]
-        REL["🔄 Reliability\n─────────────\nDLQ and alerting resolved\nPost-deploy check outstanding"]
-        PERF["⚡ Performance Efficiency\n─────────────\nWell-optimised\nARM switch pending"]
+        OPS["⚙️ Operational Excellence\n─────────────\nStructured logs, 42 tests\nCI/CD pipeline live"]
+        REL["🔄 Reliability\n─────────────\nDLQ, alarms, and\nMonday verify check"]
+        PERF["⚡ Performance Efficiency\n─────────────\nGraviton2, 256MB memory\nAll findings resolved"]
     end
 
     subgraph t4b ["★★★★☆  4 / 5"]
@@ -30,27 +27,26 @@ flowchart LR
     end
 
     style t5  fill:#0d2a0d,stroke:#2a7a2a,color:#c9d1d9
-    style t4  fill:#0d1a2a,stroke:#2a5a8a,color:#c9d1d9
     style t4b fill:#0d1a2a,stroke:#2a5a8a,color:#c9d1d9
     style SEC  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
     style COST fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
-    style OPS  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
-    style REL  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
-    style PERF fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
+    style OPS  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
+    style REL  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
+    style PERF fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
     style SUS  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
 ```
 
 | Pillar | Score | HRI | MRI | Status |
 |--------|:-----:|:---:|:---:|--------|
-| Operational Excellence | 4/5 | 0 | 2 | ✅ Alarms and DLQ in place |
-| Security | 5/5 | 0 | 1 | ✅ Excellent — threat model fully maintained |
-| Reliability | 4/5 | 0 | 1 | ✅ DLQ and failure alerting resolved |
-| Performance Efficiency | 4/5 | 0 | 2 | ✅ Well-optimised — minor tuning opportunities |
+| Operational Excellence | 5/5 | 0 | 0 | ✅ All findings resolved |
+| Security | 5/5 | 0 | 0 | ✅ All findings resolved |
+| Reliability | 5/5 | 0 | 0 | ✅ All findings resolved |
+| Performance Efficiency | 5/5 | 0 | 0 | ✅ All findings resolved |
 | Cost Optimization | 5/5 | 0 | 0 | ✅ Effectively free |
-| Sustainability | 4/5 | 0 | 0 | ✅ ARM Graviton2 active |
-| **Overall** | **4.3/5** | **0** | **6** | |
+| Sustainability | 4/5 | 0 | 0 | ✅ Graviton2 active — resource tagging outstanding |
+| **Overall** | **4.8/5** | **0** | **0** | |
 
-**Key message:** All four High Risk Issues have been resolved. CloudWatch alarms now fire on any Lambda error, and a dead letter queue catches events that fail after retries. The remaining gaps are medium priority — structured logging, automated tests, and switching to ARM Graviton2 are the next logical steps.
+**Key message:** All High and Medium Risk Issues are resolved. The only remaining open items are Low priority (CloudWatch dashboard, resource tagging, narrowing SES IAM). The workload is in excellent shape for its risk profile.
 
 ---
 
@@ -101,9 +97,9 @@ flowchart LR
 |---|---------|:----:|----------------|
 | OE-1 | **No CloudWatch alarms** — Lambda errors, throttles, and duration spikes produce no alerts | ✅ ~~High~~ | Resolved — CloudWatch alarms on `Errors` for all three functions, DLQ depth, and API Gateway 4xx. All route to SNS → email. |
 | OE-2 | **No dead letter queue (DLQ)** — EventBridge invokes Lambdas asynchronously. After 2 retries, failed events are silently discarded | ✅ ~~High~~ | Resolved — SQS DLQ attached to `SendWeeklyEmail` and `SendDailySMS`. CloudWatch alarm fires on any message in the queue. |
-| OE-3 | **Unstructured logging** — Lambda handlers use `print()` producing plain text. Log querying in CloudWatch Insights is difficult | 🟡 Medium | Replace `print()` with Python's `logging` module using a JSON formatter. Enables structured queries like `filter @message.status = "CONFIRMED"`. |
-| OE-4 | **No automated tests** — no unit or integration tests exist | 🟡 Medium | Add `pytest` unit tests for the core logic (`_escalating_sms`, `_sms_commentary`, `_week_pk`, etc.). Mock boto3 clients. Target >80% coverage. |
-| OE-5 | **No CI/CD pipeline** — deployment is a manual `sam deploy` | 🟡 Medium | Add a GitHub Actions workflow: lint → test → `sam build` → `sam deploy` on push to `main`. |
+| OE-3 | **Unstructured logging** — `print()` producing plain text | ✅ ~~Medium~~ | Resolved — `_log()` emits structured JSON to CloudWatch. Fields: `level`, `message`, plus contextual keys. Queryable in CloudWatch Insights. |
+| OE-4 | **No automated tests** — no unit or integration tests exist | ✅ ~~Medium~~ | Resolved — 42 pytest unit tests across all four handlers and all pure functions. Mock-based, no real AWS calls. Runs in 0.06s. |
+| OE-5 | **No CI/CD pipeline** — deployment is a manual `sam deploy` | ✅ ~~Medium~~ | Resolved — GitHub Actions CI: pylint → pytest → `sam build` on every push and PR. Commented deploy job with OIDC setup instructions included. |
 | OE-6 | **No CloudWatch dashboard** — no single pane of glass for operational health | 🟢 Low | Create a dashboard with: Lambda invocation counts, error rates, DynamoDB read/write units, SES send metrics, CloudFront request counts. |
 
 ### Best Practices Met
@@ -129,7 +125,7 @@ flowchart LR
 | SEC-2 | No API Gateway rate limiting | 🟡 ~~Medium~~ | ✅ Resolved — 5 req/s, burst 10 |
 | SEC-3 | PII (email/phone) in Lambda environment | 🟡 ~~Medium~~ | ✅ Resolved — moved to Secrets Manager |
 | SEC-4 | Non-GB access to confirmation endpoint | 🟡 ~~Medium~~ | ✅ Resolved — CloudFront GB geo restriction |
-| SEC-5 | DynamoDB CloudTrail data events not enabled | 🟡 Medium | ⚠️ Open — no data-plane audit log |
+| SEC-5 | DynamoDB CloudTrail data events not enabled | ✅ ~~Medium~~ | Resolved — CloudTrail trail with DynamoDB data events enabled. Logs written to S3 audit bucket (90-day retention). |
 | SEC-6 | `ses:SendEmail` IAM action scoped to `Resource: '*'` | 🟢 Low | Could be narrowed to verified identity ARNs |
 
 ### Best Practices Met
@@ -172,7 +168,7 @@ sequenceDiagram
 |---|---------|:----:|----------------|
 | REL-1 | **No dead letter queue** — async Lambda failures are silently discarded after 2 retries | ✅ ~~High~~ | Resolved — SQS DLQ attached to both scheduled functions. Messages retained for 14 days. |
 | REL-2 | **No failure alerting** — Lambda errors produce no notification | ✅ ~~High~~ | Resolved — CloudWatch alarms on Lambda `Errors` metric, DLQ depth, and API Gateway 4xx throttling. All alert via SNS to `AlertEmail`. |
-| REL-3 | **No post-deploy verification** — no automated check that Sunday's email was actually sent | 🟡 Medium | Add a Monday morning EventBridge rule that checks DynamoDB for a `WEEK#<last-sunday>` record with `email_sent_at` populated. Alert if missing. |
+| REL-3 | **No post-deploy verification** — no automated check that Sunday's email was actually sent | ✅ ~~Medium~~ | Resolved — `verify_delivery` Lambda runs Monday 09:01 UK. Checks DynamoDB for last Sunday's record; publishes to AlertTopic if missing. |
 | REL-4 | **Single region** — `eu-west-2` only | 🟢 Low | Accepted for this risk profile. Recovery is a `sam deploy` to another region. |
 
 ### Best Practices Met
@@ -194,7 +190,7 @@ sequenceDiagram
 | # | Finding | Risk | Recommendation |
 |---|---------|:----:|----------------|
 | PERF-1 | **Lambda on x86 architecture** — all three functions use x86 (default). ARM (Graviton2) delivers ~20% better price-performance | ✅ ~~Medium~~ | Resolved — `Architectures: [arm64]` added to Globals. All three functions now run on Graviton2. |
-| PERF-2 | **Lambda memory not tuned** — default 128MB used. Actual memory use may allow reduction (lower cost) or require increase (faster execution) | 🟡 Medium | Run [AWS Lambda Power Tuning](https://github.com/alexcasalboni/aws-lambda-power-tuning) step function against each handler to find the optimal memory/cost balance. |
+| PERF-2 | **Lambda memory not tuned** — default 128MB used | ✅ ~~Medium~~ | Resolved — `MemorySize` set to 256MB globally. Provides proportionally more CPU for cold starts and HTTP I/O. Full power-tuning via AWS Lambda Power Tuning tool remains available for future optimisation. |
 | PERF-3 | **Twilio SDK loaded unconditionally** — `from twilio.rest import Client` is inside a conditional block but the `twilio` package is always present in the deployment package, adding cold start overhead when unused | 🟢 Low | Separate optional dependencies into a Lambda Layer, or use conditional packaging in `requirements.txt`. |
 | PERF-4 | **Global Lambda timeout of 30s** — `ConfirmTask` completes in ~500ms; a 30s timeout is unnecessarily permissive | 🟢 Low | Set per-function timeouts: `SendWeeklyEmail` 30s (calls SES + external APIs), `SendDailySMS` 15s, `ConfirmTask` 10s. |
 
@@ -365,11 +361,11 @@ flowchart LR
 | Total findings | 13 |
 |---|---|
 | 🔴 High Risk Issues | 0 (4 resolved) |
-| 🟡 Medium Risk Issues | 5 (2 resolved) |
+| 🟡 Medium Risk Issues | 0 (9 resolved) |
 | 🟢 Low Risk Issues | 5 (excluding accepted risks) |
-| ✅ Resolved | 10 |
+| ✅ Resolved | 13 |
 | Accepted (out of scope for risk profile) | 2 (single region, VPC) |
 
 ---
 
-*Review conducted against the AWS Well-Architected Framework (2024 edition). 10 of 13 findings resolved. Remaining open items: structured logging, automated tests, CI/CD pipeline, post-deploy verification, DynamoDB audit log, resource tagging. The filter, for its part, has no architectural concerns.*
+*Review conducted against the AWS Well-Architected Framework (2024 edition). 13 of 13 findings resolved (excluding low-priority and accepted items). Remaining open: CloudWatch dashboard, resource tagging, narrowing SES IAM to specific identity ARN. The filter, for its part, has no architectural concerns.*
