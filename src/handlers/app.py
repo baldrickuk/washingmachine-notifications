@@ -14,8 +14,6 @@ LONDON_TZ = ZoneInfo("Europe/London")
 TEST_SMS_INTERVAL_SECONDS = 600  # 10 minutes
 
 TABLE_NAME = os.environ["TABLE_NAME"]
-WIFE_EMAIL = os.environ["WIFE_EMAIL"]
-WIFE_PHONE = os.environ["WIFE_PHONE"]
 FROM_EMAIL = os.environ["FROM_EMAIL"]
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
 ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
@@ -35,6 +33,9 @@ def _load_secrets() -> dict:
         return {}
 
 _SECRETS = _load_secrets()
+
+WIFE_EMAIL = _SECRETS.get("wife_email") or os.environ.get("WIFE_EMAIL", "")
+WIFE_PHONE = _SECRETS.get("wife_phone") or os.environ.get("WIFE_PHONE", "")
 
 # --- Twilio (optional SMS provider) ---
 _TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")

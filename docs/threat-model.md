@@ -129,14 +129,14 @@ flowchart LR
 
 flowchart TD
     subgraph env ["Lambda execution environment"]
-        EV["Environment variables\n─────────────────\nWIFE_EMAIL · WIFE_PHONE\nFROM_EMAIL · TWILIO_ACCOUNT_SID\nSECRETS_ARN"]
-        SM["Secrets Manager\n─────────────────\ntwilio_auth_token ✅\nwhatsapp_access_token ✅"]
+        EV["Environment variables\n─────────────────\nFROM_EMAIL · TWILIO_ACCOUNT_SID\nSECRETS_ARN"]
+        SM["Secrets Manager\n─────────────────\ntwilio_auth_token\nwhatsapp_access_token\nwife_email\nwife_phone"]
         CODE["Function code\n(read-only, immutable)"]
         ROLE["IAM Role\n(scoped permissions)"]
     end
 
     ATTACKER["☠ Attacker"] -. "needs AWS account\ncompromise to reach" .-> EV
-    ATTACKER -. "scoped to one secret ARN\n— limited blast radius" .-> SM
+    ATTACKER -. "needs AWS account compromise\n— scoped to one secret ARN" .-> SM
     SM -->|"fetched at cold start\ncached in memory"| CODE
     EV -->|"non-sensitive config"| CODE
     CODE -->|"assumes"| ROLE
@@ -151,7 +151,7 @@ flowchart TD
 | **S** Spoofing EventBridge source | Fake scheduled events triggering Lambdas | 🟢 Very Low | 🟡 Medium | EventBridge invokes Lambda via resource-based policy; only this account's rules can trigger |
 | **T** Code tampering | Attacker modifying Lambda code | 🟢 Very Low | 🔴 High | Requires AWS account compromise; mitigated by MFA and least-privilege IAM |
 | **I** Credential exposure | Auth tokens accessible via Lambda config | ✅ ~~Medium~~ → Very Low | 🔴 High | **Resolved (finding #1):** `twilio_auth_token` and `whatsapp_access_token` moved to Secrets Manager. IAM scoped to the specific secret ARN. Tokens no longer appear in `lambda:GetFunctionConfiguration` output. |
-| **I** PII in environment | `WIFE_EMAIL` and `WIFE_PHONE` in Lambda config | 🟡 Medium | 🟡 Medium | Visible to any IAM principal with `lambda:GetFunctionConfiguration`. Restrict this permission. Consider migrating to Secrets Manager. |
+| **I** PII in environment | `WIFE_EMAIL` and `WIFE_PHONE` in Lambda config | ✅ ~~Medium~~ → Very Low | 🟡 Medium | **Resolved (finding #4):** `wife_email` and `wife_phone` moved to Secrets Manager. Lambda env vars now contain no PII or credentials — only non-sensitive identifiers (`TABLE_NAME`, `FROM_EMAIL`, `TWILIO_ACCOUNT_SID`). |
 | **D** Lambda throttling | Concurrent invocations exhausted | 🟢 Very Low | 🟢 Low | Functions run at most a handful of times per day; account concurrency limits are not a realistic concern |
 
 ---
@@ -265,13 +265,13 @@ flowchart TD
 |---|---------|------------|
 | 1 | **Credentials stored as Lambda environment variables** | Moved `twilio_auth_token` and `whatsapp_access_token` to **AWS Secrets Manager** (`washingmachine-notifications/secrets`). Fetched at cold start, cached in memory, never visible in Lambda config. IAM scoped to the specific secret ARN. |
 | 2 | **No API Gateway rate limiting** | `/confirm` endpoint throttled to **5 req/s sustained, burst of 10** via `DefaultRouteSettings` on the HTTP API stage. Excess requests receive 429 before Lambda is invoked. |
+| 4 | **PII in Lambda environment** | `wife_email` and `wife_phone` moved to **AWS Secrets Manager** alongside auth tokens. Lambda environment variables now contain no PII or credentials — only non-sensitive identifiers (`TABLE_NAME`, `FROM_EMAIL`, `TWILIO_ACCOUNT_SID`). |
 
 ### 🟡 Medium Priority — Open
 
 | # | Finding | Recommendation |
 |---|---------|---------------|
 | 3 | **No DynamoDB CloudTrail data events** — reads and writes to the reminders table are not audited | Enable **CloudTrail data event logging** for the table. Cost is negligible at this volume. |
-| 4 | **PII in Lambda environment** — `WIFE_EMAIL` and `WIFE_PHONE` visible in function config | Restrict `lambda:GetFunctionConfiguration` in the AWS account IAM policy to admin roles only. Consider migrating to Secrets Manager. |
 | 5 | **Secrets Manager values in CloudFormation events** — raw token values flow through CloudFormation change set during deploy | Parameters marked `NoEcho: true` (done). Additionally restrict CloudFormation stack event access to admin IAM roles only. |
 
 ### 🟢 Low Priority / Informational
@@ -290,9 +290,9 @@ flowchart TD
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff'}}}%%
 
 pie title Security controls in place
-    "Strong (token auth, IAM least-privilege, HTTPS, TTL, Secrets Manager, rate limiting, geo restriction)" : 75
+    "Strong (token auth, IAM least-privilege, HTTPS, TTL, Secrets Manager, rate limiting, geo restriction)" : 80
     "Adequate (CloudWatch logging, idempotent confirmation, NoEcho params)" : 15
-    "Needs improvement (DynamoDB audit log, PII in env vars)" : 10
+    "Needs improvement (DynamoDB audit log)" : 5
 ```
 
 | Area | Status |
@@ -305,10 +305,10 @@ pie title Security controls in place
 | Rate limiting | ✅ `/confirm` throttled to 5 req/s, burst 10 |
 | Geo restriction | ✅ CloudFront GB-only whitelist — non-GB requests blocked at the edge |
 | Audit logging | ⚠️ CloudWatch logs Lambda; DynamoDB data events not enabled |
-| PII protection | ⚠️ Email and phone in Lambda env vars — restrict `GetFunctionConfiguration` |
+| PII protection | ✅ Email and phone in Secrets Manager — not visible in Lambda config |
 | Input validation | ✅ `week` parsed as ISO date; token compared server-side |
 | Dependency supply chain | ✅ Minimal dependencies (`boto3`, optional `twilio`) |
 
 ---
 
-*Threat model version 1.2 — May 2026. Findings #1 and #2 resolved. CloudFront GB geo restriction added. Review annually or when the architecture changes materially. Or when the filter starts answering back.*
+*Threat model version 1.3 — May 2026. Findings #1, #2, and #4 resolved. One open finding remains (#3 — DynamoDB audit log). Review annually or when the architecture changes materially. Or when the filter starts answering back.*

@@ -290,10 +290,10 @@ sequenceDiagram
     participant ENV as Environment Variables
 
     L->>SM: GetSecretValue(SECRETS_ARN)
-    SM-->>L: {"twilio_auth_token": "...", "whatsapp_access_token": "..."}
+    SM-->>L: {"twilio_auth_token": "...", "whatsapp_access_token": "...", "wife_email": "...", "wife_phone": "..."}
     Note over L: Cached in module-level _SECRETS dict
 
-    L->>ENV: Read non-sensitive config<br/>(WIFE_EMAIL, WIFE_PHONE, TABLE_NAME…)
+    L->>ENV: Read non-sensitive config<br/>(FROM_EMAIL, TABLE_NAME, TWILIO_ACCOUNT_SID…)
     Note over L,ENV: Falls back to env vars if<br/>Secrets Manager unavailable
 ```
 
@@ -301,8 +301,9 @@ sequenceDiagram
 |---|---|:---:|
 | `twilio_auth_token` | Secrets Manager | No |
 | `whatsapp_access_token` | Secrets Manager | No |
-| `WIFE_EMAIL` | Environment variable | Yes — restrict `lambda:GetFunctionConfiguration` |
-| `WIFE_PHONE` | Environment variable | Yes — restrict `lambda:GetFunctionConfiguration` |
+| `wife_email` | Secrets Manager | No |
+| `wife_phone` | Secrets Manager | No |
+| `FROM_EMAIL` | Environment variable | Yes (sender address — not PII) |
 | `TWILIO_ACCOUNT_SID` | Environment variable | Yes (identifier, not credential) |
 
 ---

@@ -63,8 +63,6 @@ Globals:
     Environment:
       Variables:
         TABLE_NAME: !Ref RemindersTable
-        WIFE_EMAIL: !Ref WifeEmail
-        WIFE_PHONE: !Ref WifePhone
         FROM_EMAIL: !Ref FromEmail
         ANIMAL_TYPE: !Ref AnimalType
         TWILIO_ACCOUNT_SID: !Ref TwilioAccountSid
@@ -131,7 +129,9 @@ Resources:
       SecretString: !Sub |
         {
           "twilio_auth_token": "${TwilioAuthToken}",
-          "whatsapp_access_token": "${WhatsAppAccessToken}"
+          "whatsapp_access_token": "${WhatsAppAccessToken}",
+          "wife_email": "${WifeEmail}",
+          "wife_phone": "${WifePhone}"
         }
 
   ConfirmCloudFront:
