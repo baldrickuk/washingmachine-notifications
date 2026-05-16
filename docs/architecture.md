@@ -24,7 +24,13 @@ graph LR
 
     subgraph store ["  Storage  "]
         DB[("DynamoDB\n─────────────\nPK: WEEK#YYYY-MM-DD\nstatus · token\nsms_dates · ttl")]
-        SM[("Secrets Manager\n─────────────\ntwilio_auth_token\nwhatsapp_access_token")]
+        SM[("Secrets Manager\n─────────────\ntwilio_auth_token\nwife_email · wife_phone")]
+    end
+
+    subgraph ops ["  Observability  "]
+        DLQ[("SQS DLQ\n─────────────\n14-day retention")]
+        CW["CloudWatch\nAlarms x5"]
+        STOPIC["SNS Alert Topic\n─────────────\nAlertEmail"]
     end
 
     subgraph edge ["  Edge  "]
@@ -56,6 +62,9 @@ graph LR
     L3 -->|mark confirmed| DB
     L3 -->|send congratulations| SES
 
+    L1 & L2 -.->|"on failure\n(after retries)"| DLQ
+    CW -->|"errors / DLQ depth\n/ 4xx throttle"| STOPIC
+
     SES --> EM
     TW --> PH
     WA --> PH
@@ -71,6 +80,7 @@ graph LR
     classDef edge fill:#1a3a3a,stroke:#3a7a7a,color:#70d0d0
     classDef gateway fill:#1a2a3a,stroke:#3a5a7a,color:#70a0c0
     classDef person fill:#2a2a2a,stroke:#5a5a5a,color:#c0c0c0
+    classDef obsv fill:#1a1a3a,stroke:#5a5a9a,color:#a0a0d0
 
     class EB1,EB2,EB3 schedule
     class L1,L2,L3 fn
@@ -80,6 +90,7 @@ graph LR
     class CF edge
     class GW gateway
     class EM,PH person
+    class DLQ,CW,STOPIC obsv
 ```
 
 ---
@@ -95,7 +106,10 @@ graph LR
 | **SES** | Email via verified identity | Sends reminder and congratulations emails |
 | **CloudFront** | Distribution, `PriceClass_100`, GB whitelist | GB-only geo restriction at the CDN edge — non-GB requests never reach the origin |
 | **API Gateway** | HTTP API, `GET /confirm`, throttled 5 req/s | Confirmation link origin behind CloudFront |
-| **IAM** | Single shared role | Least-privilege access to DDB, SES, Secrets Manager |
+| **SQS** | Dead letter queue, 14-day retention | Catches Lambda events that fail after all retries |
+| **CloudWatch** | 5 metric alarms | Monitors Lambda errors, DLQ depth, and API Gateway 4xx throttling |
+| **SNS** | Alert topic → `AlertEmail` | Delivers operational alerts via email |
+| **IAM** | Single shared role | Least-privilege access to DDB, SES, Secrets Manager, SQS |
 
 ---
 
@@ -421,6 +435,56 @@ aws lambda invoke \
 
 # 3. Disable the rule when finished
 ```
+
+---
+
+## Operational Monitoring
+
+Five CloudWatch alarms cover all critical failure paths. All route to an SNS topic which delivers email to the configured `AlertEmail` address.
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
+
+flowchart LR
+    subgraph alarms ["CloudWatch Alarms"]
+        A1["weekly-email-errors\nLambda Errors >= 1"]
+        A2["daily-sms-errors\nLambda Errors >= 1"]
+        A3["confirm-task-errors\nLambda Errors >= 1"]
+        A4["dlq-depth\nMessages > 0"]
+        A5["api-throttling\n4xx > 5 per 5min"]
+    end
+
+    subgraph sources ["Monitored resources"]
+        L1["SendWeeklyEmail λ"]
+        L2["SendDailySMS λ"]
+        L3["ConfirmTask λ"]
+        DLQ[("SQS DLQ")]
+        GW["API Gateway"]
+    end
+
+    L1 -->|Errors metric| A1
+    L2 -->|Errors metric| A2
+    L3 -->|Errors metric| A3
+    L1 & L2 -.->|on failure| DLQ
+    DLQ -->|ApproximateNumberOfMessagesVisible| A4
+    GW -->|4xx metric| A5
+
+    A1 & A2 & A3 & A4 & A5 -->|ALARM state| SNS["SNS Alert Topic"]
+    SNS -->|email| ADMIN["AlertEmail"]
+
+    style alarms fill:#1a1a3a,stroke:#5a5a9a
+    style sources fill:#0d2137,stroke:#1e4a7a
+```
+
+| Alarm | Metric | Threshold | What it means |
+|---|---|:---:|---|
+| `weekly-email-errors` | Lambda `Errors` | ≥ 1 | Sunday email may not have been sent |
+| `daily-sms-errors` | Lambda `Errors` | ≥ 1 | A daily escalation may have been missed |
+| `confirm-task-errors` | Lambda `Errors` | ≥ 1 | A confirmation attempt may have failed |
+| `dlq-depth` | SQS `ApproximateNumberOfMessagesVisible` | > 0 | A Lambda failed after all retries — event is preserved for inspection |
+| `api-throttling` | API Gateway `4xx` | > 5 / 5 min | Rate limit being hit — likely unusual traffic through CloudFront |
+
+**Dead Letter Queue:** `SendWeeklyEmail` and `SendDailySMS` both write to the DLQ after exhausting Lambda's built-in retry attempts (2 retries). Messages are retained for 14 days. `ConfirmTask` is excluded — it is invoked synchronously by API Gateway, so the DLQ mechanism does not apply.
 
 ---
 

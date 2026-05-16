@@ -43,7 +43,13 @@ flowchart TD
         end
 
         subgraph secrets ["Secrets Manager"]
-            SM[("washingmachine-notifications/secrets\ntwilio_auth_token\nwhatsapp_access_token")]
+            SM[("washingmachine-notifications/secrets\ntwilio_auth_token\nwhatsapp_access_token\nwife_email · wife_phone")]
+        end
+
+        subgraph observability ["Observability"]
+            DLQ[("SQS DLQ\n14-day retention")]
+            CW["CloudWatch\nAlarms x5"]
+            ATOPIC["SNS Alert Topic"]
         end
 
         subgraph edge ["CloudFront + API Gateway"]
@@ -61,6 +67,8 @@ flowchart TD
     EB -->|"scheduled invoke\n(no user input)"| L1
     EB -->|"scheduled invoke"| L2
     L1 & L2 & L3 -->|"GetSecretValue\n(cold start)"| SM
+    L1 & L2 -.->|"on failure"| DLQ
+    CW -->|ALARM| ATOPIC
     L1 -->|"read/write"| DB
     L2 -->|"read/write"| DB
     L3 -->|"read/write"| DB
@@ -304,7 +312,7 @@ pie title Security controls in place
 | Secrets management | ✅ Auth tokens in Secrets Manager — not in Lambda env vars |
 | Rate limiting | ✅ `/confirm` throttled to 5 req/s, burst 10 |
 | Geo restriction | ✅ CloudFront GB-only whitelist — non-GB requests blocked at the edge |
-| Audit logging | ⚠️ CloudWatch logs Lambda; DynamoDB data events not enabled |
+| Audit logging | ⚠️ CloudWatch alarms active; Lambda logs to CloudWatch; DynamoDB data events not enabled |
 | PII protection | ✅ Email and phone in Secrets Manager — not visible in Lambda config |
 | Input validation | ✅ `week` parsed as ISO date; token compared server-side |
 | Dependency supply chain | ✅ Minimal dependencies (`boto3`, optional `twilio`) |
