@@ -38,6 +38,25 @@ def _week_pk(sunday: date, test: bool = False) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Initial SMS nudge — sent alongside the Sunday email
+# ---------------------------------------------------------------------------
+
+def _send_nudge_sms(is_test: bool = False):
+    prefix = "[TEST] " if is_test else ""
+    sns.publish(
+        PhoneNumber=WIFE_PHONE,
+        Message=(
+            f"{prefix}📧 You've got mail! No, really — check your inbox. "
+            "There's an important message in there about a filter that has feelings "
+            "and would very much like to be cleaned. It's Sunday. You know what that means."
+        ),
+        MessageAttributes={
+            "AWS.SNS.SMS.SMSType": {"DataType": "String", "StringValue": "Transactional"},
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Handler: send weekly email (Sunday 09:00 UK time)
 # ---------------------------------------------------------------------------
 
@@ -80,6 +99,7 @@ def send_weekly_email(event, context):
         + ("&test=1" if is_test else "")
     )
     _send_email(confirm_url, is_test)
+    _send_nudge_sms(is_test)
     print(f"{'TEST ' if is_test else ''}Email sent for {pk}")
 
 
