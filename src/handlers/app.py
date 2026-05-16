@@ -17,6 +17,7 @@ TABLE_NAME = os.environ["TABLE_NAME"]
 FROM_EMAIL = os.environ["FROM_EMAIL"]
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
 ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
+ALERT_TOPIC_ARN = os.environ.get("ALERT_TOPIC_ARN", "")
 
 # --- Secrets Manager (fetched once at cold start, cached for Lambda lifetime) ---
 def _load_secrets() -> dict:
@@ -29,7 +30,7 @@ def _load_secrets() -> dict:
         response = client.get_secret_value(SecretId=arn)
         return json.loads(response["SecretString"])
     except (ClientError, json.JSONDecodeError, KeyError) as exc:
-        print(f"Warning: could not load secrets from Secrets Manager: {exc}")
+        _log("Failed to load secrets", level="WARNING", error=str(exc))
         return {}
 
 _SECRETS = _load_secrets()
@@ -62,6 +63,17 @@ WHATSAPP_ENABLED = bool(WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN)
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 ses = boto3.client("ses")
+sns = boto3.client("sns")
+
+
+# ---------------------------------------------------------------------------
+# Structured logging
+# ---------------------------------------------------------------------------
+
+def _log(message: str, level: str = "INFO", **context) -> None:
+    """Emit a structured JSON log entry captured by CloudWatch Logs."""
+    print(json.dumps({"level": level, "message": message, **context}))
+
 
 # ---------------------------------------------------------------------------
 # Channel-agnostic notification dispatchers
@@ -133,19 +145,19 @@ def _send_whatsapp(template_name: str, body_params: list):
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=10) as r:
-        print(f"WhatsApp sent via Meta API: {r.read()}")
+        _log("WhatsApp sent", template=template_name, response=r.read().decode())
 
 
 # ---------------------------------------------------------------------------
-# SMS (Twilio or SNS fallback)
+# SMS (Twilio only — opt-in)
 # ---------------------------------------------------------------------------
 
 def _send_sms(body: str):
     if not TWILIO_ENABLED:
-        print("SMS skipped — Twilio not configured")
+        _log("SMS skipped", reason="Twilio not configured")
         return
     _TWILIO_CLIENT.messages.create(to=WIFE_PHONE, from_=TWILIO_FROM_NUMBER, body=body)
-    print("SMS sent via Twilio")
+    _log("SMS sent", provider="Twilio")
 
 
 def _now_london() -> datetime:
@@ -185,7 +197,7 @@ def send_weekly_email(event, _context):
     now = _now_london()
 
     if not is_test and (now.weekday() != 6 or now.hour != 9):
-        print(f"Not Sunday 09:xx UK time ({now.strftime('%A %H:%M')}), skipping")
+        _log("DST guard: skipping", weekday=now.strftime("%A"), hour=now.hour)
         return
 
     sunday = now.date()
@@ -195,9 +207,9 @@ def send_weekly_email(event, _context):
     if existing:
         if is_test:
             table.delete_item(Key={"PK": pk})
-            print(f"Cleared previous test record {pk}")
+            _log("Cleared previous test record", pk=pk)
         else:
-            print(f"Email already sent for {pk}")
+            _log("Notification already sent", pk=pk)
             return
 
     token = str(uuid.uuid4())
@@ -218,7 +230,7 @@ def send_weekly_email(event, _context):
         + ("&test=1" if is_test else "")
     )
     _notify_initial(confirm_url, is_test)
-    print(f"{'TEST ' if is_test else ''}Notification sent for {pk}")
+    _log("Notification sent", pk=pk, test=is_test)
 
 
 def _send_email(confirm_url: str, is_test: bool = False):
@@ -345,7 +357,7 @@ def _escalating_sms(sms_count: int, sunday: date) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Handler: send daily SMS/WhatsApp (08:00 UK time) while unconfirmed
+# Handler: send daily reminder (08:00 UK time) while unconfirmed
 # ---------------------------------------------------------------------------
 
 def send_daily_sms(event, _context):
@@ -354,7 +366,7 @@ def send_daily_sms(event, _context):
     now = _now_london()
 
     if not is_test and now.hour != 8:
-        print(f"Not 08:xx UK time ({now.hour}:xx), skipping")
+        _log("DST guard: skipping", hour=now.hour)
         return
 
     sunday = now.date() if is_test else _this_weeks_sunday(now)
@@ -362,13 +374,13 @@ def send_daily_sms(event, _context):
 
     response = table.get_item(Key={"PK": pk})
     if "Item" not in response:
-        print(f"No record for {pk}, nothing to remind about")
+        _log("No record found", pk=pk)
         return
 
     item = response["Item"]
 
     if item["status"] == "CONFIRMED":
-        print(f"Already confirmed for {pk}")
+        _log("Already confirmed", pk=pk)
         return
 
     if is_test:
@@ -376,12 +388,12 @@ def send_daily_sms(event, _context):
         if last_sms_at:
             elapsed = (now - datetime.fromisoformat(last_sms_at)).total_seconds()
             if elapsed < TEST_SMS_INTERVAL_SECONDS:
-                print(f"Test reminder sent {elapsed:.0f}s ago (<10 min), skipping")
+                _log("Test reminder throttled", elapsed_seconds=int(elapsed))
                 return
     else:
         today_str = now.date().isoformat()
         if today_str in item.get("sms_dates", []):
-            print(f"Reminder already sent today ({today_str}) for {pk}")
+            _log("Reminder already sent today", date=today_str, pk=pk)
             return
 
     sms_count = len(item.get("sms_dates", []))
@@ -398,7 +410,43 @@ def send_daily_sms(event, _context):
         UpdateExpression=update_expr,
         ExpressionAttributeValues=expr_values,
     )
-    print(f"{'TEST ' if is_test else ''}Reminder #{sms_count + 1} sent for {pk}")
+    _log("Reminder sent", pk=pk, reminder_number=sms_count + 1, test=is_test)
+
+
+# ---------------------------------------------------------------------------
+# Handler: Monday post-deploy verification (09:01 UK time)
+# ---------------------------------------------------------------------------
+
+def verify_delivery(event, _context):
+    """Check that last Sunday's reminder was sent; alert via SNS if not."""
+    is_test = bool(event.get("test"))
+    now = _now_london()
+
+    if not is_test and (now.weekday() != 0 or now.hour != 9):
+        _log("DST guard: skipping", weekday=now.strftime("%A"), hour=now.hour)
+        return
+
+    last_sunday = now.date() - timedelta(days=now.weekday() + 1)
+    pk = _week_pk(last_sunday)
+
+    response = table.get_item(Key={"PK": pk})
+    if "Item" in response and response["Item"].get("email_sent_at"):
+        _log("Delivery verified", pk=pk, status=response["Item"].get("status"))
+        return
+
+    message = (
+        f"ALERT: No reminder record found for {pk}. "
+        "The Sunday notification may not have been sent. "
+        "Check CloudWatch logs and the DLQ."
+    )
+    _log("Delivery verification FAILED", pk=pk, level="ERROR")
+
+    if ALERT_TOPIC_ARN:
+        sns.publish(
+            TopicArn=ALERT_TOPIC_ARN,
+            Subject="washingmachine-notifications: Sunday reminder not sent",
+            Message=message,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +485,7 @@ def _fetch_animal_image(animal: str) -> str:
             return r.url
 
     except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError) as exc:
-        print(f"Could not fetch {animal} image: {exc}")
+        _log("Could not fetch animal image", animal=animal, error=str(exc), level="WARNING")
         return ""
 
 
@@ -509,6 +557,7 @@ def confirm_task(event, _context):
         return _html_response(200, _already_confirmed_page())
 
     if item["token"] != token:
+        _log("Invalid token presented", pk=pk, level="WARNING")
         return _html_response(403, _error_page("Invalid confirmation token."))
 
     now = _now_london()
@@ -524,6 +573,7 @@ def confirm_task(event, _context):
         },
     )
 
+    _log("Task confirmed", pk=pk, reminders_sent=sms_count)
     _notify_congratulations(sms_count, ANIMAL_TYPE)
 
     return _html_response(200, _success_page())
