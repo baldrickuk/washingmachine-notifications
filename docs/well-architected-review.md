@@ -46,7 +46,7 @@ flowchart LR
 | Sustainability | 4/5 | 0 | 0 | ✅ Graviton2 active — resource tagging outstanding |
 | **Overall** | **4.8/5** | **0** | **0** | |
 
-**Key message:** All High and Medium Risk Issues are resolved. The only remaining open items are Low priority (CloudWatch dashboard, resource tagging, narrowing SES IAM). The workload is in excellent shape for its risk profile.
+**Key message:** All High, Medium, and most Low Risk Issues are now resolved. The only remaining open item is resource tagging (SUS-2). The workload is in excellent shape for its risk profile.
 
 ---
 
@@ -99,8 +99,8 @@ flowchart LR
 | OE-2 | **No dead letter queue (DLQ)** — EventBridge invokes Lambdas asynchronously. After 2 retries, failed events are silently discarded | ✅ ~~High~~ | Resolved — SQS DLQ attached to `SendWeeklyEmail` and `SendDailySMS`. CloudWatch alarm fires on any message in the queue. |
 | OE-3 | **Unstructured logging** — `print()` producing plain text | ✅ ~~Medium~~ | Resolved — `_log()` emits structured JSON to CloudWatch. Fields: `level`, `message`, plus contextual keys. Queryable in CloudWatch Insights. |
 | OE-4 | **No automated tests** — no unit or integration tests exist | ✅ ~~Medium~~ | Resolved — 42 pytest unit tests across all four handlers and all pure functions. Mock-based, no real AWS calls. Runs in 0.06s. |
-| OE-5 | **No CI/CD pipeline** — deployment is a manual `sam deploy` | ✅ ~~Medium~~ | Resolved — GitHub Actions CI: pylint → pytest → `sam build` on every push and PR. Commented deploy job with OIDC setup instructions included. |
-| OE-6 | **No CloudWatch dashboard** — no single pane of glass for operational health | 🟢 Low | Create a dashboard with: Lambda invocation counts, error rates, DynamoDB read/write units, SES send metrics, CloudFront request counts. |
+| OE-5 | **No CI/CD pipeline** — deployment is a manual `sam deploy` | ✅ ~~Medium~~ | Resolved — GitHub Actions CI: pylint → pytest → `tofu validate` on every push and PR. Commented deploy job with OIDC setup instructions included. |
+| OE-6 | **No CloudWatch dashboard** — no single pane of glass for operational health | ✅ ~~Low~~ | Resolved — 8-widget dashboard covering Lambda invocations, errors, p99 duration, DynamoDB requests, API Gateway requests + 4xx, SQS DLQ depth, Lambda throttles, and concurrent executions. |
 
 ### Best Practices Met
 
@@ -126,7 +126,7 @@ flowchart LR
 | SEC-3 | PII (email/phone) in Lambda environment | 🟡 ~~Medium~~ | ✅ Resolved — moved to Secrets Manager |
 | SEC-4 | Non-GB access to confirmation endpoint | 🟡 ~~Medium~~ | ✅ Resolved — CloudFront GB geo restriction |
 | SEC-5 | DynamoDB CloudTrail data events not enabled | ✅ ~~Medium~~ | Resolved — CloudTrail trail with DynamoDB data events enabled. Logs written to S3 audit bucket (90-day retention). |
-| SEC-6 | `ses:SendEmail` IAM action scoped to `Resource: '*'` | 🟢 Low | Could be narrowed to verified identity ARNs |
+| SEC-6 | `ses:SendEmail` IAM action scoped to `Resource: '*'` | ✅ ~~Low~~ | Resolved — scoped to `arn:aws:ses:{region}:{account}:identity/{from_email}`. No more wildcard resource. |
 
 ### Best Practices Met
 
@@ -191,8 +191,8 @@ sequenceDiagram
 |---|---------|:----:|----------------|
 | PERF-1 | **Lambda on x86 architecture** — all three functions use x86 (default). ARM (Graviton2) delivers ~20% better price-performance | ✅ ~~Medium~~ | Resolved — `Architectures: [arm64]` added to Globals. All three functions now run on Graviton2. |
 | PERF-2 | **Lambda memory not tuned** — default 128MB used | ✅ ~~Medium~~ | Resolved — `MemorySize` set to 256MB globally. Provides proportionally more CPU for cold starts and HTTP I/O. Full power-tuning via AWS Lambda Power Tuning tool remains available for future optimisation. |
-| PERF-3 | **Twilio SDK loaded unconditionally** — `from twilio.rest import Client` is inside a conditional block but the `twilio` package is always present in the deployment package, adding cold start overhead when unused | 🟢 Low | Separate optional dependencies into a Lambda Layer, or use conditional packaging in `requirements.txt`. |
-| PERF-4 | **Global Lambda timeout of 30s** — `ConfirmTask` completes in ~500ms; a 30s timeout is unnecessarily permissive | 🟢 Low | Set per-function timeouts: `SendWeeklyEmail` 30s (calls SES + external APIs), `SendDailySMS` 15s, `ConfirmTask` 10s. |
+| PERF-3 | **Twilio SDK loaded unconditionally** — `twilio` package always present in deployment zip, adding ~29 MB when unused | ✅ ~~Low~~ | Resolved — `build.sh` strips Lambda runtime packages (boto3, botocore, etc.) and only installs Twilio when `TWILIO_ENABLED=true`. Package size: 29 MB → 29 KB. |
+| PERF-4 | **Global Lambda timeout of 30s** — all functions shared an unnecessarily permissive timeout | ✅ ~~Low~~ | Resolved — per-function timeouts: `SendWeeklyEmail` 30s, `SendDailySMS` 15s, `ConfirmTask` 10s, `VerifyDelivery` 15s. |
 
 ### Best Practices Met
 
@@ -292,11 +292,12 @@ gantt
     REL-3   Monday post-deploy verification       :2026-05-31, 1d
 
     section Low Risk (backlog)
-    PERF-2  Lambda Power Tuning                   :2026-06-07, 2d
-    PERF-4  Per-function timeout tuning           :2026-06-09, 1d
-    OE-6    CloudWatch dashboard                  :2026-06-10, 1d
-    SUS-2   Resource tagging                      :2026-06-11, 1d
-    SEC-6   Narrow SES IAM to identity ARN        :2026-06-12, 1d
+    PERF-2  Lambda Power Tuning resolved          :done, 2026-06-07, 2d
+    PERF-3  Remove Twilio from default build      :done, 2026-06-08, 1d
+    PERF-4  Per-function timeout tuning           :done, 2026-06-09, 1d
+    OE-6    CloudWatch dashboard                  :done, 2026-06-10, 1d
+    SEC-6   Narrow SES IAM to identity ARN        :done, 2026-06-12, 1d
+    SUS-2   Resource tagging                      :2026-06-14, 1d
 ```
 
 ### Quick wins (under 30 minutes each)
@@ -362,10 +363,10 @@ flowchart LR
 |---|---|
 | 🔴 High Risk Issues | 0 (4 resolved) |
 | 🟡 Medium Risk Issues | 0 (9 resolved) |
-| 🟢 Low Risk Issues | 5 (excluding accepted risks) |
-| ✅ Resolved | 13 |
+| 🟢 Low Risk Issues | 1 open — SUS-2 resource tagging (4 resolved) |
+| ✅ Resolved | 17 |
 | Accepted (out of scope for risk profile) | 2 (single region, VPC) |
 
 ---
 
-*Review conducted against the AWS Well-Architected Framework (2024 edition). 13 of 13 findings resolved (excluding low-priority and accepted items). Remaining open: CloudWatch dashboard, resource tagging, narrowing SES IAM to specific identity ARN. The filter, for its part, has no architectural concerns.*
+*Review conducted against the AWS Well-Architected Framework (2024 edition). 17 of 18 findings resolved. One open item: resource tagging (SUS-2, low priority). The filter, for its part, has no architectural concerns.*
