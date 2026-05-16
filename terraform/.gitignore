@@ -1,0 +1,13 @@
+# Sensitive variable values
+terraform.tfvars
+
+# Build artefacts
+.lambda_build/
+.lambda.zip
+
+# Terraform state and cache
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan

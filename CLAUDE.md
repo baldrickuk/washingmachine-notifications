@@ -4,38 +4,54 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`washingmachine-notifications` — an AWS serverless solution that emails a weekly reminder to clean the washing machine filter every Sunday at 09:00 UK time, then sends daily SMS reminders at 08:00 UK time until the task is confirmed via a link in the email.
+`washingmachine-notifications` — an AWS serverless solution that emails a weekly reminder to clean the washing machine filter every Sunday at 09:00 UK time, then sends daily escalating reminders until the task is confirmed via a link.
 
 ## Architecture
 
-- **Lambda (Python 3.12)** — three handlers in `src/handlers/app.py`
-- **DynamoDB** — one record per week (`WEEK#YYYY-MM-DD`), tracks status (`PENDING`/`CONFIRMED`) and which days SMS was sent
-- **SES** — sends the weekly email with a confirmation link
-- **SNS** — sends SMS directly to a phone number (no topic)
-- **API Gateway (HTTP API)** — serves `GET /confirm?week=...&token=...`
-- **EventBridge** — two schedule rules per trigger to cover GMT and BST (Lambda checks actual UK hour and skips if wrong)
+- **Lambda (Python 3.12, arm64)** — four handlers in `src/handlers/app.py`
+- **DynamoDB** — one record per week (`WEEK#YYYY-MM-DD`), tracks status (`PENDING`/`CONFIRMED`) and reminder history
+- **SES** — sends the weekly reminder email and congratulations
+- **API Gateway (HTTP API v2)** — serves `GET /confirm?week=...&token=...` (throttled 5 req/s)
+- **CloudFront** — GB-only geo restriction in front of API Gateway
+- **EventBridge** — two schedule rules per trigger to cover GMT and BST
+- **Secrets Manager** — stores credentials and recipient PII
+- **SQS DLQ** — catches Lambda failures after retries
+- **SNS** — alert topic for CloudWatch alarms and delivery verification failures
+- **CloudTrail** — DynamoDB data event audit log
+
+## Infrastructure
+
+Managed with **Terraform / OpenTofu** (`terraform/` directory).
 
 ## Build & Deploy
 
-Prerequisites: AWS CLI configured, SAM CLI installed.
+Prerequisites: OpenTofu (`tofu`) or Terraform (`terraform`), AWS CLI configured, Python 3.
 
 ```bash
-# First deploy only: copy the example config and fill in your values
-cp samconfig.toml.example samconfig.toml
-# Edit samconfig.toml: set WifeEmail, WifePhone (+44...), FromEmail
+# First deploy only: copy example vars and fill in your values
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Edit terraform/terraform.tfvars — set wife_email, wife_phone, from_email, alert_email
 
-sam build
-sam deploy        # --guided on first run if you skip samconfig.toml
+# Build the Lambda package (must run before plan/apply when source changes)
+bash terraform/build.sh
+
+# Deploy
+cd terraform
+tofu init
+tofu apply
 ```
 
-## AWS one-time setup (before first deploy)
+## Tests
 
-1. **SES — verify sender email**: AWS Console → SES → Verified identities → Create identity
-2. **SES production access**: by default SES is in sandbox (can only send to verified addresses). Request production access if needed, or also verify the recipient email.
-3. **SNS SMS**: check your SNS account spend limit in AWS Console → SNS → Text messaging (SMS). Default $1/month limit — raise it for production use.
+```bash
+pip install -r tests/requirements.txt
+python -m pytest tests/ -v
+```
 
 ## Key conventions
 
-- `samconfig.toml` is gitignored (contains personal email/phone). Use `samconfig.toml.example` as the template.
-- DST handling: EventBridge fires at both possible UTC times (e.g. 08:00 and 09:00 UTC for 09:00 UK). The Lambda checks `datetime.now(ZoneInfo("Europe/London")).hour` and exits early if it's not the right hour.
+- `terraform/terraform.tfvars` is gitignored (contains personal email/phone).
+- DST handling: EventBridge fires at both possible UTC times. Lambda checks `datetime.now(ZoneInfo("Europe/London")).hour` and exits early if wrong.
 - DynamoDB TTL: records auto-expire after 30 days.
+- Structured logging: use `_log(message, **context)` — emits JSON to CloudWatch.
+- All print() is banned; use `_log()` to keep pylint 10/10.

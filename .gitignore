@@ -1,6 +1,3 @@
-# SAM build output
-.aws-sam/
-
 # Python
 __pycache__/
 *.pyc
@@ -9,5 +6,6 @@ __pycache__/
 .venv/
 venv/
 
-# samconfig contains personal email/phone — keep out of git
-samconfig.toml
+# Terraform — sensitive values and local state
+# (per-directory .gitignore in terraform/ covers build artefacts and state)
+terraform/terraform.tfvars

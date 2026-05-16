@@ -1,0 +1,26 @@
+aws_region  = "eu-west-2"
+stack_name  = "washingmachine-notifications"
+
+# Recipient details (stored in Secrets Manager on deploy — never in Lambda env vars)
+wife_email  = "recipient@example.com"
+wife_phone  = "+447700000000"
+
+# Email configuration
+from_email  = "reminders@yourdomain.com"
+alert_email = "ops@yourdomain.com"
+
+# Reward animal (bunny, cat, dog, fox)
+animal_type = "bunny"
+
+# Twilio SMS (optional — leave as-is to disable)
+twilio_enabled     = "false"
+twilio_account_sid = "unused"
+twilio_auth_token  = "unused"
+twilio_from_number = "unused"
+
+# WhatsApp via Meta Cloud API (optional — leave blank to disable)
+whatsapp_phone_number_id     = ""
+whatsapp_access_token        = ""
+whatsapp_reminder_template   = "filter_reminder"
+whatsapp_escalation_template = "filter_escalation"
+whatsapp_congrats_template   = "filter_confirmed"
