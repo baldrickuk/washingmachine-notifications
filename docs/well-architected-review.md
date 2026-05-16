@@ -25,19 +25,19 @@ flowchart LR
         PERF["⚡ Performance Efficiency\n─────────────\nWell-optimised\nARM switch pending"]
     end
 
-    subgraph t3 ["★★★☆☆  3 / 5"]
-        SUS["🌱 Sustainability\n─────────────\nServerless near-zero idle\nARM Graviton2 not yet used"]
+    subgraph t4b ["★★★★☆  4 / 5"]
+        SUS["🌱 Sustainability\n─────────────\nGraviton2 active\nResource tagging outstanding"]
     end
 
-    style t5 fill:#0d2a0d,stroke:#2a7a2a,color:#c9d1d9
-    style t4 fill:#0d1a2a,stroke:#2a5a8a,color:#c9d1d9
-    style t3 fill:#2a1a0d,stroke:#8a5a2a,color:#c9d1d9
+    style t5  fill:#0d2a0d,stroke:#2a7a2a,color:#c9d1d9
+    style t4  fill:#0d1a2a,stroke:#2a5a8a,color:#c9d1d9
+    style t4b fill:#0d1a2a,stroke:#2a5a8a,color:#c9d1d9
     style SEC  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
     style COST fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
     style OPS  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
     style REL  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
     style PERF fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
-    style SUS  fill:#3a2a1a,stroke:#8a6a3a,color:#e0c0a0
+    style SUS  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
 ```
 
 | Pillar | Score | HRI | MRI | Status |
@@ -47,8 +47,8 @@ flowchart LR
 | Reliability | 4/5 | 0 | 1 | ✅ DLQ and failure alerting resolved |
 | Performance Efficiency | 4/5 | 0 | 2 | ✅ Well-optimised — minor tuning opportunities |
 | Cost Optimization | 5/5 | 0 | 0 | ✅ Effectively free |
-| Sustainability | 3/5 | 0 | 1 | ⚠️ ARM/Graviton not used |
-| **Overall** | **4.2/5** | **0** | **7** | |
+| Sustainability | 4/5 | 0 | 0 | ✅ ARM Graviton2 active |
+| **Overall** | **4.3/5** | **0** | **6** | |
 
 **Key message:** All four High Risk Issues have been resolved. CloudWatch alarms now fire on any Lambda error, and a dead letter queue catches events that fail after retries. The remaining gaps are medium priority — structured logging, automated tests, and switching to ARM Graviton2 are the next logical steps.
 
@@ -193,7 +193,7 @@ sequenceDiagram
 
 | # | Finding | Risk | Recommendation |
 |---|---------|:----:|----------------|
-| PERF-1 | **Lambda on x86 architecture** — all three functions use x86 (default). ARM (Graviton2) delivers ~20% better price-performance | 🟡 Medium | Add `Architectures: [arm64]` to Globals in `template.yaml`. Python 3.12 fully supports ARM Lambda. No code changes required. |
+| PERF-1 | **Lambda on x86 architecture** — all three functions use x86 (default). ARM (Graviton2) delivers ~20% better price-performance | ✅ ~~Medium~~ | Resolved — `Architectures: [arm64]` added to Globals. All three functions now run on Graviton2. |
 | PERF-2 | **Lambda memory not tuned** — default 128MB used. Actual memory use may allow reduction (lower cost) or require increase (faster execution) | 🟡 Medium | Run [AWS Lambda Power Tuning](https://github.com/alexcasalboni/aws-lambda-power-tuning) step function against each handler to find the optimal memory/cost balance. |
 | PERF-3 | **Twilio SDK loaded unconditionally** — `from twilio.rest import Client` is inside a conditional block but the `twilio` package is always present in the deployment package, adding cold start overhead when unused | 🟢 Low | Separate optional dependencies into a Lambda Layer, or use conditional packaging in `requirements.txt`. |
 | PERF-4 | **Global Lambda timeout of 30s** — `ConfirmTask` completes in ~500ms; a 30s timeout is unnecessarily permissive | 🟢 Low | Set per-function timeouts: `SendWeeklyEmail` 30s (calls SES + external APIs), `SendDailySMS` 15s, `ConfirmTask` 10s. |
@@ -257,7 +257,7 @@ pie title Monthly cost breakdown (~$0.40 total)
 
 | # | Finding | Risk | Recommendation |
 |---|---------|:----:|----------------|
-| SUS-1 | **Lambda on x86 architecture** — ARM (Graviton2) processors are ~60% more energy-efficient per unit of compute than equivalent x86 | 🟡 Medium | Switch to `arm64` in `template.yaml` (same change as PERF-1). This is the single most impactful sustainability improvement available. |
+| SUS-1 | **Lambda on x86 architecture** — ARM (Graviton2) processors are ~60% more energy-efficient per unit of compute than equivalent x86 | ✅ ~~Medium~~ | Resolved — all functions now on `arm64` Graviton2. Single most impactful sustainability improvement delivered. |
 | SUS-2 | **No resource tagging** — AWS Customer Carbon Footprint Tool and cost allocation reports require consistent tagging | 🟢 Low | Add stack-level tags: `Project`, `Environment`, `Owner`. In SAM, use the `Tags` section under `Globals`. |
 
 ### Current Sustainability Strengths
@@ -365,11 +365,11 @@ flowchart LR
 | Total findings | 13 |
 |---|---|
 | 🔴 High Risk Issues | 0 (4 resolved) |
-| 🟡 Medium Risk Issues | 7 |
+| 🟡 Medium Risk Issues | 5 (2 resolved) |
 | 🟢 Low Risk Issues | 5 (excluding accepted risks) |
-| ✅ Resolved | 8 |
+| ✅ Resolved | 10 |
 | Accepted (out of scope for risk profile) | 2 (single region, VPC) |
 
 ---
 
-*Review conducted against the AWS Well-Architected Framework (2024 edition). Next review recommended after addressing the High Risk Issues, or when the architecture changes materially — whichever comes first. The filter, for its part, has no architectural concerns.*
+*Review conducted against the AWS Well-Architected Framework (2024 edition). 10 of 13 findings resolved. Remaining open items: structured logging, automated tests, CI/CD pipeline, post-deploy verification, DynamoDB audit log, resource tagging. The filter, for its part, has no architectural concerns.*
