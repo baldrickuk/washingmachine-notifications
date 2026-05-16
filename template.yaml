@@ -88,6 +88,9 @@ Resources:
               - Effect: Allow
                 Action: ses:SendEmail
                 Resource: '*'
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: '*'
 
   ConfirmApi:
     Type: AWS::Serverless::HttpApi

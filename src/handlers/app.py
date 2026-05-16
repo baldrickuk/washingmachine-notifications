@@ -20,17 +20,33 @@ ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
 _TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 _TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
-SMS_ENABLED = bool(_TWILIO_SID and _TWILIO_TOKEN and TWILIO_FROM_NUMBER)
+TWILIO_ENABLED = bool(_TWILIO_SID and _TWILIO_TOKEN and TWILIO_FROM_NUMBER)
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 ses = boto3.client("ses")
+sns = boto3.client("sns")
 
-if SMS_ENABLED:
+if TWILIO_ENABLED:
     from twilio.rest import Client as TwilioClient
     twilio = TwilioClient(_TWILIO_SID, _TWILIO_TOKEN)
 else:
     twilio = None
+
+
+def _send_sms(body: str):
+    if TWILIO_ENABLED:
+        twilio.messages.create(to=WIFE_PHONE, from_=TWILIO_FROM_NUMBER, body=body)
+        print("SMS sent via Twilio")
+    else:
+        sns.publish(
+            PhoneNumber=WIFE_PHONE,
+            Message=body,
+            MessageAttributes={
+                "AWS.SNS.SMS.SMSType": {"DataType": "String", "StringValue": "Transactional"},
+            },
+        )
+        print("SMS sent via SNS")
 
 
 def _now_london() -> datetime:
@@ -52,18 +68,11 @@ def _week_pk(sunday: date, test: bool = False) -> str:
 # ---------------------------------------------------------------------------
 
 def _send_nudge_sms(is_test: bool = False):
-    if not SMS_ENABLED:
-        print("SMS not configured, skipping nudge")
-        return
     prefix = "[TEST] " if is_test else ""
-    twilio.messages.create(
-        to=WIFE_PHONE,
-        from_=TWILIO_FROM_NUMBER,
-        body=(
-            f"{prefix}📧 You've got mail! No, really — check your inbox. "
-            "There's an important message in there about a filter that has feelings "
-            "and would very much like to be cleaned. It's Sunday. You know what that means."
-        ),
+    _send_sms(
+        f"{prefix}📧 You've got mail! No, really — check your inbox. "
+        "There's an important message in there about a filter that has feelings "
+        "and would very much like to be cleaned. It's Sunday. You know what that means."
     )
 
 
@@ -275,18 +284,9 @@ def send_daily_sms(event, context):
             print(f"SMS already sent today ({today_str}) for {pk}")
             return
 
-    if not SMS_ENABLED:
-        print("SMS not configured, skipping daily reminder")
-        return
-
     sms_count = len(item.get("sms_dates", []))
     message = _escalating_sms(sms_count, sunday)
-
-    twilio.messages.create(
-        to=WIFE_PHONE,
-        from_=TWILIO_FROM_NUMBER,
-        body=message,
-    )
+    _send_sms(message)
 
     dedup_value = now.isoformat() if is_test else now.date().isoformat()
     update_expr = "SET sms_dates = :dates"
