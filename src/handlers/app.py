@@ -42,7 +42,6 @@ WHATSAPP_ENABLED = bool(WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN)
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 ses = boto3.client("ses")
-sns = boto3.client("sns")
 
 # ---------------------------------------------------------------------------
 # Channel-agnostic notification dispatchers
@@ -122,18 +121,11 @@ def _send_whatsapp(template_name: str, body_params: list):
 # ---------------------------------------------------------------------------
 
 def _send_sms(body: str):
-    if TWILIO_ENABLED:
-        _TWILIO_CLIENT.messages.create(to=WIFE_PHONE, from_=TWILIO_FROM_NUMBER, body=body)
-        print("SMS sent via Twilio")
-    else:
-        sns.publish(
-            PhoneNumber=WIFE_PHONE,
-            Message=body,
-            MessageAttributes={
-                "AWS.SNS.SMS.SMSType": {"DataType": "String", "StringValue": "Transactional"},
-            },
-        )
-        print("SMS sent via SNS")
+    if not TWILIO_ENABLED:
+        print("SMS skipped — Twilio not configured")
+        return
+    _TWILIO_CLIENT.messages.create(to=WIFE_PHONE, from_=TWILIO_FROM_NUMBER, body=body)
+    print("SMS sent via Twilio")
 
 
 def _now_london() -> datetime:
