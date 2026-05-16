@@ -16,6 +16,16 @@ Parameters:
     Type: String
     Default: bunny
     Description: Animal photo to reward the recipient with on confirmation (bunny, cat, dog, fox)
+  TwilioAccountSid:
+    Type: String
+    Description: Twilio Account SID
+  TwilioAuthToken:
+    Type: String
+    Description: Twilio Auth Token
+    NoEcho: true
+  TwilioFromNumber:
+    Type: String
+    Description: Twilio phone number to send SMS from in E.164 format (e.g. +447700900000)
 
 Globals:
   Function:
@@ -28,6 +38,9 @@ Globals:
         WIFE_PHONE: !Ref WifePhone
         FROM_EMAIL: !Ref FromEmail
         ANIMAL_TYPE: !Ref AnimalType
+        TWILIO_ACCOUNT_SID: !Ref TwilioAccountSid
+        TWILIO_AUTH_TOKEN: !Ref TwilioAuthToken
+        TWILIO_FROM_NUMBER: !Ref TwilioFromNumber
 
 Resources:
   RemindersTable:
@@ -71,9 +84,6 @@ Resources:
                 Resource: !GetAtt RemindersTable.Arn
               - Effect: Allow
                 Action: ses:SendEmail
-                Resource: '*'
-              - Effect: Allow
-                Action: sns:Publish
                 Resource: '*'
 
   ConfirmApi:

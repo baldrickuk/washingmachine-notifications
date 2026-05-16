@@ -6,6 +6,7 @@ from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
 import boto3
+from twilio.rest import Client as TwilioClient
 
 LONDON_TZ = ZoneInfo("Europe/London")
 TEST_SMS_INTERVAL_SECONDS = 600  # 10 minutes
@@ -16,11 +17,12 @@ WIFE_PHONE = os.environ["WIFE_PHONE"]
 FROM_EMAIL = os.environ["FROM_EMAIL"]
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
 ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
+TWILIO_FROM_NUMBER = os.environ["TWILIO_FROM_NUMBER"]
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 ses = boto3.client("ses")
-sns = boto3.client("sns")
+twilio = TwilioClient(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])
 
 
 def _now_london() -> datetime:
@@ -43,16 +45,14 @@ def _week_pk(sunday: date, test: bool = False) -> str:
 
 def _send_nudge_sms(is_test: bool = False):
     prefix = "[TEST] " if is_test else ""
-    sns.publish(
-        PhoneNumber=WIFE_PHONE,
-        Message=(
+    twilio.messages.create(
+        to=WIFE_PHONE,
+        from_=TWILIO_FROM_NUMBER,
+        body=(
             f"{prefix}📧 You've got mail! No, really — check your inbox. "
             "There's an important message in there about a filter that has feelings "
             "and would very much like to be cleaned. It's Sunday. You know what that means."
         ),
-        MessageAttributes={
-            "AWS.SNS.SMS.SMSType": {"DataType": "String", "StringValue": "Transactional"},
-        },
     )
 
 
@@ -267,12 +267,10 @@ def send_daily_sms(event, context):
     sms_count = len(item.get("sms_dates", []))
     message = _escalating_sms(sms_count, sunday)
 
-    sns.publish(
-        PhoneNumber=WIFE_PHONE,
-        Message=message,
-        MessageAttributes={
-            "AWS.SNS.SMS.SMSType": {"DataType": "String", "StringValue": "Transactional"},
-        },
+    twilio.messages.create(
+        to=WIFE_PHONE,
+        from_=TWILIO_FROM_NUMBER,
+        body=message,
     )
 
     dedup_value = now.isoformat() if is_test else now.date().isoformat()
