@@ -6,7 +6,6 @@ from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
 import boto3
-from twilio.rest import Client as TwilioClient
 
 LONDON_TZ = ZoneInfo("Europe/London")
 TEST_SMS_INTERVAL_SECONDS = 600  # 10 minutes
@@ -17,12 +16,21 @@ WIFE_PHONE = os.environ["WIFE_PHONE"]
 FROM_EMAIL = os.environ["FROM_EMAIL"]
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
 ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
-TWILIO_FROM_NUMBER = os.environ["TWILIO_FROM_NUMBER"]
+
+_TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
+_TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
+SMS_ENABLED = bool(_TWILIO_SID and _TWILIO_TOKEN and TWILIO_FROM_NUMBER)
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 ses = boto3.client("ses")
-twilio = TwilioClient(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])
+
+if SMS_ENABLED:
+    from twilio.rest import Client as TwilioClient
+    twilio = TwilioClient(_TWILIO_SID, _TWILIO_TOKEN)
+else:
+    twilio = None
 
 
 def _now_london() -> datetime:
@@ -44,6 +52,9 @@ def _week_pk(sunday: date, test: bool = False) -> str:
 # ---------------------------------------------------------------------------
 
 def _send_nudge_sms(is_test: bool = False):
+    if not SMS_ENABLED:
+        print("SMS not configured, skipping nudge")
+        return
     prefix = "[TEST] " if is_test else ""
     twilio.messages.create(
         to=WIFE_PHONE,
@@ -263,6 +274,10 @@ def send_daily_sms(event, context):
         if today_str in item.get("sms_dates", []):
             print(f"SMS already sent today ({today_str}) for {pk}")
             return
+
+    if not SMS_ENABLED:
+        print("SMS not configured, skipping daily reminder")
+        return
 
     sms_count = len(item.get("sms_dates", []))
     message = _escalating_sms(sms_count, sunday)

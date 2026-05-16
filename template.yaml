@@ -18,14 +18,17 @@ Parameters:
     Description: Animal photo to reward the recipient with on confirmation (bunny, cat, dog, fox)
   TwilioAccountSid:
     Type: String
-    Description: Twilio Account SID
+    Default: ""
+    Description: Twilio Account SID (optional — SMS disabled if blank)
   TwilioAuthToken:
     Type: String
-    Description: Twilio Auth Token
+    Default: ""
     NoEcho: true
+    Description: Twilio Auth Token (optional — SMS disabled if blank)
   TwilioFromNumber:
     Type: String
-    Description: Twilio phone number to send SMS from in E.164 format (e.g. +447700900000)
+    Default: ""
+    Description: Twilio phone number to send SMS from in E.164 format (optional — SMS disabled if blank)
 
 Globals:
   Function:
