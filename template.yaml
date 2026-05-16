@@ -12,6 +12,10 @@ Parameters:
   FromEmail:
     Type: String
     Description: Verified SES sender email address
+  AnimalType:
+    Type: String
+    Default: bunny
+    Description: Animal photo to reward the recipient with on confirmation (bunny, cat, dog, fox)
 
 Globals:
   Function:
@@ -23,6 +27,7 @@ Globals:
         WIFE_EMAIL: !Ref WifeEmail
         WIFE_PHONE: !Ref WifePhone
         FROM_EMAIL: !Ref FromEmail
+        ANIMAL_TYPE: !Ref AnimalType
 
 Resources:
   RemindersTable:
@@ -62,6 +67,7 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                 Resource: !GetAtt RemindersTable.Arn
               - Effect: Allow
                 Action: ses:SendEmail

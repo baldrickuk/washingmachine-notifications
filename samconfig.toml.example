@@ -1,3 +1,5 @@
+version = 0.1
+
 [default.global.parameters]
 stack_name = "washingmachine-notifications"
 
@@ -13,5 +15,6 @@ region = "eu-west-2"
 parameter_overrides = [
   "WifeEmail=wife@example.com",
   "WifePhone=+447700000000",
-  "FromEmail=reminders@yourdomain.com"
+  "FromEmail=reminders@yourdomain.com",
+  "AnimalType=bunny"
 ]

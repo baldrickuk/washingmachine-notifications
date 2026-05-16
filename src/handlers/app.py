@@ -1,4 +1,6 @@
+import json
 import os
+import urllib.request
 import uuid
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -13,6 +15,7 @@ WIFE_EMAIL = os.environ["WIFE_EMAIL"]
 WIFE_PHONE = os.environ["WIFE_PHONE"]
 FROM_EMAIL = os.environ["FROM_EMAIL"]
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
+ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
@@ -268,6 +271,86 @@ def send_daily_sms(event, context):
 
 
 # ---------------------------------------------------------------------------
+# Animal image fetching
+# ---------------------------------------------------------------------------
+
+def _fetch_animal_image(animal: str) -> str:
+    """Return a direct image URL for the given animal. Falls back to empty string on any error."""
+    animal = animal.lower().strip()
+    try:
+        if animal == "cat":
+            with urllib.request.urlopen(
+                "https://api.thecatapi.com/v1/images/search?limit=1&mime_types=jpg,png",
+                timeout=5,
+            ) as r:
+                return json.loads(r.read())[0]["url"]
+
+        elif animal == "dog":
+            with urllib.request.urlopen(
+                "https://dog.ceo/api/breeds/image/random", timeout=5
+            ) as r:
+                return json.loads(r.read())["message"]
+
+        elif animal == "fox":
+            with urllib.request.urlopen(
+                "https://randomfox.ca/floof/", timeout=5
+            ) as r:
+                return json.loads(r.read())["image"]
+
+        else:  # bunny / anything else — loremflickr follows redirect to a static CDN URL
+            search_term = "rabbit" if animal == "bunny" else animal
+            req = urllib.request.Request(
+                f"https://loremflickr.com/640/480/{search_term}/all",
+                headers={"User-Agent": "WashingMachineReminder/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.url
+
+    except Exception as exc:
+        print(f"Could not fetch {animal} image: {exc}")
+        return ""
+
+
+def _animal_caption(animal: str) -> str:
+    captions = {
+        "cat": "This cat is… mildly impressed. For a cat, that is basically a standing ovation.",
+        "dog": "This dog is SO PROUD OF YOU. They have been waiting for this moment all week.",
+        "fox": "This fox respects your hustle.",
+        "bunny": "This bunny is beaming with pride. Look at that face. Pure, uncut pride.",
+    }
+    return captions.get(animal.lower(), f"This {animal} salutes you.")
+
+
+def _sms_commentary(sms_count: int) -> str:
+    if sms_count == 0:
+        return (
+            "You actioned this on the very first email. "
+            "An absolute titan of domestic responsibility. "
+            "A legend in your own lifetime."
+        )
+    elif sms_count == 1:
+        return "It took one gentle nudge. Honestly, practically immediate. Well done."
+    elif sms_count == 2:
+        return "Two reminders. That is basically the same as doing it straight away. We respect the process."
+    elif sms_count <= 4:
+        return (
+            f"After {sms_count} reminders, the deed is done. "
+            "The filter exhales. The household is at peace."
+        )
+    elif sms_count <= 6:
+        return (
+            f"It took {sms_count} increasingly concerned messages, but justice has prevailed. "
+            "The filter's legal team has been stood down. The washing machine has called off the work-to-rule."
+        )
+    else:
+        return (
+            f"After {sms_count} days of escalating crisis — including industrial action, "
+            "a press conference, and the filter writing its will — the task is complete. "
+            "The filter has dropped all charges. History will remember this day."
+        )
+
+
+# ---------------------------------------------------------------------------
 # Handler: confirm task via link click
 # ---------------------------------------------------------------------------
 
@@ -295,6 +378,8 @@ def confirm_task(event, context):
         return _html_response(403, _error_page("Invalid confirmation token."))
 
     now = _now_london()
+    sms_count = len(item.get("sms_dates", []))
+
     table.update_item(
         Key={"PK": pk},
         UpdateExpression="SET #s = :status, confirmed_at = :confirmed_at",
@@ -305,7 +390,27 @@ def confirm_task(event, context):
         },
     )
 
+    _send_congratulations_email(sms_count, ANIMAL_TYPE)
+
     return _html_response(200, _success_page())
+
+
+def _send_congratulations_email(sms_count: int, animal: str):
+    image_url = _fetch_animal_image(animal)
+    commentary = _sms_commentary(sms_count)
+    caption = _animal_caption(animal)
+
+    ses.send_email(
+        Source=FROM_EMAIL,
+        Destination={"ToAddresses": [WIFE_EMAIL]},
+        Message={
+            "Subject": {"Data": "Filter cleaned! Here is your reward 🎉"},
+            "Body": {
+                "Html": {"Data": _congratulations_html(commentary, caption, image_url, animal)},
+                "Text": {"Data": f"Congratulations! {commentary} Your reward awaits: {image_url}"},
+            },
+        },
+    )
 
 
 def _html_response(status_code: int, body: str) -> dict:
@@ -314,6 +419,60 @@ def _html_response(status_code: int, body: str) -> dict:
         "headers": {"Content-Type": "text/html; charset=utf-8"},
         "body": body,
     }
+
+
+def _congratulations_html(commentary: str, caption: str, image_url: str, animal: str) -> str:
+    image_block = (
+        f"""
+        <div style="text-align:center;margin:24px 0 8px;">
+          <img src="{image_url}" alt="A celebratory {animal}"
+               style="max-width:100%;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,0.2);">
+        </div>
+        <p style="text-align:center;color:#888;font-size:13px;font-style:italic;">{caption}</p>
+        """
+        if image_url
+        else ""
+    )
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:30px 0;">
+    <tr><td align="center">
+      <table width="100%" style="max-width:560px;background:#ffffff;border-radius:8px;overflow:hidden;box-sizing:border-box;">
+        <tr><td>
+          <div style="background:linear-gradient(135deg,#2e7d32,#43a047);padding:32px;text-align:center;">
+            <div style="font-size:52px;">🎉</div>
+            <h1 style="margin:12px 0 0;color:#ffffff;font-size:26px;letter-spacing:-0.5px;">
+              Congratulations!
+            </h1>
+            <p style="margin:8px 0 0;color:#c8e6c9;font-size:15px;">
+              The filter has been cleaned.
+            </p>
+          </div>
+          <div style="padding:32px;">
+            <p style="color:#333;line-height:1.7;font-size:15px;">{commentary}</p>
+            <p style="color:#555;line-height:1.7;font-size:15px;">
+              As a token of gratitude from the household — and from the filter itself,
+              who has asked us to pass on its sincerest thanks — please accept this {animal}:
+            </p>
+            {image_block}
+            <p style="color:#555;line-height:1.7;font-size:15px;">
+              No further reminders will be sent this week.
+            </p>
+            <p style="color:#555;line-height:1.7;font-size:15px;">
+              Until next Sunday.
+            </p>
+            <p style="color:#aaa;font-size:13px;margin-top:24px;border-top:1px solid #eee;padding-top:16px;">
+              The Washing Machine Notification System™ — keeping filters clean since 2026.
+            </p>
+          </div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
 
 
 def _success_page() -> str:
