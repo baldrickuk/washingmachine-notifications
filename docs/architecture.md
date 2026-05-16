@@ -14,12 +14,14 @@ graph LR
         EB1("Sunday 09:00 UK\n─────────────\nBST: cron 0 8 SUN\nGMT: cron 0 9 SUN")
         EB2("Daily 08:00 UK\n─────────────\nBST: cron 0 7 *\nGMT: cron 0 8 *")
         EB3("Every 10 min\n─────────────\nTest only\ndisabled by default")
+        EB4("Monday 09:01 UK\n─────────────\nBST: cron 1 8 MON\nGMT: cron 1 9 MON")
     end
 
     subgraph lambda ["  Lambda Functions  "]
         L1["SendWeeklyEmail"]
         L2["SendDailySMS"]
         L3["ConfirmTask"]
+        L4["VerifyDelivery"]
     end
 
     subgraph store ["  Storage  "]
@@ -52,8 +54,11 @@ graph LR
     EB1 -->|fires| L1
     EB2 -->|fires| L2
     EB3 -.->|fires test| L2
+    EB4 -->|fires| L4
 
-    L1 & L2 & L3 -->|read at cold start| SM
+    L1 & L2 & L3 & L4 -->|read at cold start| SM
+    L4 -->|check record| DB
+    L4 -.->|"alert if\nmissing"| STOPIC
     L1 -->|create record| DB
     L1 -->|send| SES
     L2 -->|check & update| DB
@@ -82,8 +87,8 @@ graph LR
     classDef person fill:#2a2a2a,stroke:#5a5a5a,color:#c0c0c0
     classDef obsv fill:#1a1a3a,stroke:#5a5a9a,color:#a0a0d0
 
-    class EB1,EB2,EB3 schedule
-    class L1,L2,L3 fn
+    class EB1,EB2,EB3,EB4 schedule
+    class L1,L2,L3,L4 fn
     class DB storage
     class SM secret
     class SES,TW,WA messaging
@@ -99,17 +104,18 @@ graph LR
 
 | Component | Resource | Purpose |
 |---|---|---|
-| **EventBridge** | 5 scheduled rules (4 prod + 1 test) | Triggers reminder Lambdas on schedule |
-| **Lambda** × 3 | `SendWeeklyEmail`, `SendDailySMS`, `ConfirmTask` | All business logic |
+| **EventBridge** | 7 scheduled rules (6 prod + 1 test) | Triggers all four Lambda functions on schedule |
+| **Lambda** × 4 | `SendWeeklyEmail`, `SendDailySMS`, `ConfirmTask`, `VerifyDelivery` | All business logic — arm64 Graviton2, 256 MB |
 | **DynamoDB** | Single table, PAY_PER_REQUEST | Tracks weekly task state (30-day TTL) |
-| **Secrets Manager** | `washingmachine-notifications/secrets` | Stores Twilio and WhatsApp credentials |
+| **Secrets Manager** | `washingmachine-notifications/secrets` | Stores credentials and recipient PII |
 | **SES** | Email via verified identity | Sends reminder and congratulations emails |
 | **CloudFront** | Distribution, `PriceClass_100`, GB whitelist | GB-only geo restriction at the CDN edge — non-GB requests never reach the origin |
-| **API Gateway** | HTTP API, `GET /confirm`, throttled 5 req/s | Confirmation link origin behind CloudFront |
+| **API Gateway** | HTTP API v2, `GET /confirm`, throttled 5 req/s | Confirmation link origin behind CloudFront |
 | **SQS** | Dead letter queue, 14-day retention | Catches Lambda events that fail after all retries |
 | **CloudWatch** | 5 metric alarms | Monitors Lambda errors, DLQ depth, and API Gateway 4xx throttling |
-| **SNS** | Alert topic → `AlertEmail` | Delivers operational alerts via email |
-| **IAM** | Single shared role | Least-privilege access to DDB, SES, Secrets Manager, SQS |
+| **SNS** | Alert topic → `alert_email` | Delivers operational alerts via email |
+| **CloudTrail** | Trail + S3 audit bucket | DynamoDB data event audit log (90-day retention) |
+| **IAM** | Single shared role | Least-privilege access to DDB, SES, Secrets Manager, SQS, SNS |
 
 ---
 
@@ -424,16 +430,22 @@ flowchart LR
 
 ```bash
 # 1. Trigger the test reminder (re-run to reset the escalation counter)
+echo '{"test": true}' > /tmp/payload.json
 aws lambda invoke \
-  --function-name washingmachine-notificatio-SendWeeklyEmailFunction-FhfvdL0p367f \
+  --function-name washingmachine-notifications-send-weekly-email \
   --payload file:///tmp/payload.json \
-  --profile dev --region eu-west-2 \
+  --region eu-west-2 \
   --cli-binary-format raw-in-base64-out /dev/stdout
 
-# 2. Enable the 10-minute rule in the AWS Console:
-#    EventBridge → Rules → …TestSMSEvery10Min… → Enable
+# 2. Enable the 10-minute test rule (Terraform manages the name deterministically)
+aws events enable-rule \
+  --name washingmachine-notifications-test-sms \
+  --region eu-west-2
 
-# 3. Disable the rule when finished
+# 3. Disable when finished
+aws events disable-rule \
+  --name washingmachine-notifications-test-sms \
+  --region eu-west-2
 ```
 
 ---
@@ -488,26 +500,73 @@ flowchart LR
 
 ---
 
+## Infrastructure
+
+All AWS resources are managed with **Terraform / OpenTofu** in the `terraform/` directory. The configuration is compatible with both `tofu` (OpenTofu) and `terraform` CLIs.
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
+
+flowchart LR
+    subgraph tf ["terraform/"]
+        P["providers.tf\nAWS 5.x + null"]
+        V["variables.tf\n18 input variables"]
+        L["locals.tf\nShared env map · tags"]
+        M["main.tf\nDynamoDB · Secrets · SQS · SNS"]
+        I["iam.tf\nRole + policy documents"]
+        LM["lambda.tf\n4 functions + build trigger"]
+        A["api_gateway.tf\nHTTP API v2"]
+        C["cloudfront.tf\nGB geo restriction"]
+        E["eventbridge.tf\n7 rules"]
+        MO["monitoring.tf\n5 alarms · CloudTrail"]
+        O["outputs.tf"]
+        B["build.sh\npip install + zip"]
+    end
+
+    B -->|"creates .lambda.zip\n(run before tofu apply)"| LM
+```
+
+**Resource naming** is deterministic (`{stack_name}-{resource}`), e.g.:
+- `washingmachine-notifications-send-weekly-email`
+- `washingmachine-notifications-reminders`
+- `washingmachine-notifications-dlq`
+
+All resources are tagged via the provider `default_tags` block: `Project`, `Environment`, `ManagedBy=opentofu`.
+
+---
+
 ## Deployment
 
+**Prerequisites:** OpenTofu (`tofu`) or Terraform, AWS CLI configured, Python 3.
+
 ```bash
-# Prerequisites: AWS CLI + SAM CLI installed, AWS profile configured
+# First deploy only — copy and fill in your values
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Edit terraform/terraform.tfvars — set wife_email, wife_phone, from_email, alert_email
 
-cp samconfig.toml.example samconfig.toml
-# Edit samconfig.toml — set WifeEmail, WifePhone, FromEmail
+# Build the Lambda package (re-run whenever src/handlers/ changes)
+bash terraform/build.sh
 
-sam build && sam deploy
+# Deploy
+cd terraform
+tofu init
+tofu apply
 ```
 
 **One-time AWS setup required before first deploy:**
 
 1. **SES → Verified identities** — verify your sender address (`guy@dunite.uk`)
-2. **SES production access** — request via `aws sesv2 put-account-details` or AWS Console to lift sandbox restrictions
-3. **Secrets Manager** — populated automatically by CloudFormation from `samconfig.toml` parameter values
+2. **SES production access** — request via the AWS Console or:
+   ```bash
+   aws sesv2 put-account-details --mail-type TRANSACTIONAL \
+     --website-url https://yourdomain.com \
+     --use-case-description "Weekly household filter reminder"
+   ```
+3. **Secrets Manager** — populated automatically by `tofu apply` from `terraform.tfvars` values
 
 **Optional channels:**
 
-| Channel | Additional setup |
+| Channel | `terraform.tfvars` variables to set |
 |---|---|
-| Twilio SMS | Set `TwilioEnabled=true` and fill in `TwilioAccountSid`, `TwilioAuthToken`, `TwilioFromNumber` |
-| WhatsApp | Set `WhatsAppPhoneNumberId`, `WhatsAppAccessToken`, create three approved Meta message templates |
+| Twilio SMS | `twilio_enabled = "true"`, `twilio_account_sid`, `twilio_auth_token`, `twilio_from_number` |
+| WhatsApp | `whatsapp_phone_number_id`, `whatsapp_access_token`, create three approved Meta message templates |
