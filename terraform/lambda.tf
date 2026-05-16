@@ -45,7 +45,7 @@ resource "aws_lambda_function" "send_weekly_email" {
   runtime          = local.lambda_defaults.runtime
   architectures    = local.lambda_defaults.architectures
   memory_size      = local.lambda_defaults.memory_size
-  timeout          = local.lambda_defaults.timeout
+  timeout          = 30 # Calls SES + Secrets Manager + optional Twilio/WhatsApp
   handler          = "app.send_weekly_email"
 
   dead_letter_config {
@@ -73,7 +73,7 @@ resource "aws_lambda_function" "send_daily_sms" {
   runtime          = local.lambda_defaults.runtime
   architectures    = local.lambda_defaults.architectures
   memory_size      = local.lambda_defaults.memory_size
-  timeout          = local.lambda_defaults.timeout
+  timeout          = 15 # DynamoDB read + optional Twilio/WhatsApp call
   handler          = "app.send_daily_sms"
 
   dead_letter_config {
@@ -121,7 +121,7 @@ resource "aws_lambda_function" "verify_delivery" {
   runtime          = local.lambda_defaults.runtime
   architectures    = local.lambda_defaults.architectures
   memory_size      = local.lambda_defaults.memory_size
-  timeout          = local.lambda_defaults.timeout
+  timeout          = 15 # DynamoDB read + optional SNS publish
   handler          = "app.verify_delivery"
 
   environment {

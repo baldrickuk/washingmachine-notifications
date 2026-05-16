@@ -1,2 +1,6 @@
+# boto3 is provided by the Lambda Python 3.12 runtime.
+# No additional runtime dependencies are needed by default.
+#
+# If TWILIO_ENABLED=true, add the following line and rebuild:
+#   twilio>=9.0
 boto3>=1.34
-twilio>=9.0

@@ -1,4 +1,183 @@
 # ---------------------------------------------------------------------------
+# CloudWatch Dashboard (OE-6)
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_dashboard" "main" {
+  dashboard_name = var.stack_name
+
+  dashboard_body = jsonencode({
+    start = "-PT24H"
+    widgets = [
+      # Row 1 — Lambda invocations, errors, duration
+      {
+        type   = "metric"
+        x      = 0
+        y      = 0
+        width  = 8
+        height = 6
+        properties = {
+          title   = "Lambda — Invocations"
+          view    = "timeSeries"
+          stacked = false
+          stat    = "Sum"
+          period  = 300
+          region  = var.aws_region
+          metrics = [
+            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.send_weekly_email.function_name, { label = "WeeklyEmail" }],
+            [".", ".", ".", aws_lambda_function.send_daily_sms.function_name, { label = "DailySMS" }],
+            [".", ".", ".", aws_lambda_function.confirm_task.function_name, { label = "ConfirmTask" }],
+            [".", ".", ".", aws_lambda_function.verify_delivery.function_name, { label = "VerifyDelivery" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 0
+        width  = 8
+        height = 6
+        properties = {
+          title   = "Lambda — Errors"
+          view    = "timeSeries"
+          stacked = false
+          stat    = "Sum"
+          period  = 300
+          region  = var.aws_region
+          metrics = [
+            ["AWS/Lambda", "Errors", "FunctionName", aws_lambda_function.send_weekly_email.function_name, { label = "WeeklyEmail", color = "#d62728" }],
+            [".", ".", ".", aws_lambda_function.send_daily_sms.function_name, { label = "DailySMS", color = "#ff7f0e" }],
+            [".", ".", ".", aws_lambda_function.confirm_task.function_name, { label = "ConfirmTask", color = "#e377c2" }],
+            [".", ".", ".", aws_lambda_function.verify_delivery.function_name, { label = "VerifyDelivery", color = "#8c564b" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 0
+        width  = 8
+        height = 6
+        properties = {
+          title   = "Lambda — Duration p99 (ms)"
+          view    = "timeSeries"
+          stacked = false
+          stat    = "p99"
+          period  = 300
+          region  = var.aws_region
+          metrics = [
+            ["AWS/Lambda", "Duration", "FunctionName", aws_lambda_function.send_weekly_email.function_name, { label = "WeeklyEmail" }],
+            [".", ".", ".", aws_lambda_function.send_daily_sms.function_name, { label = "DailySMS" }],
+            [".", ".", ".", aws_lambda_function.confirm_task.function_name, { label = "ConfirmTask" }],
+            [".", ".", ".", aws_lambda_function.verify_delivery.function_name, { label = "VerifyDelivery" }],
+          ]
+        }
+      },
+      # Row 2 — DynamoDB, API Gateway, SQS
+      {
+        type   = "metric"
+        x      = 0
+        y      = 6
+        width  = 8
+        height = 6
+        properties = {
+          title   = "DynamoDB — Requests"
+          view    = "timeSeries"
+          stacked = false
+          stat    = "Sum"
+          period  = 300
+          region  = var.aws_region
+          metrics = [
+            ["AWS/DynamoDB", "SuccessfulRequestLatency", "TableName", aws_dynamodb_table.reminders.name, "Operation", "GetItem", { label = "GetItem" }],
+            [".", ".", ".", ".", ".", "PutItem", { label = "PutItem" }],
+            [".", ".", ".", ".", ".", "UpdateItem", { label = "UpdateItem" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 6
+        width  = 8
+        height = 6
+        properties = {
+          title   = "API Gateway — Requests & 4xx"
+          view    = "timeSeries"
+          stacked = false
+          stat    = "Sum"
+          period  = 300
+          region  = var.aws_region
+          metrics = [
+            ["AWS/ApiGateway", "Count", "ApiId", aws_apigatewayv2_api.confirm.id, { label = "Requests" }],
+            ["AWS/ApiGateway", "4xx", "ApiId", aws_apigatewayv2_api.confirm.id, { label = "4xx Errors", color = "#ff7f0e" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 6
+        width  = 8
+        height = 6
+        properties = {
+          title   = "SQS DLQ — Messages Visible"
+          view    = "timeSeries"
+          stacked = false
+          stat    = "Maximum"
+          period  = 60
+          region  = var.aws_region
+          metrics = [
+            ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", aws_sqs_queue.dlq.name, { label = "DLQ Depth", color = "#d62728" }],
+          ]
+        }
+      },
+      # Row 3 — Lambda throttles + concurrency
+      {
+        type   = "metric"
+        x      = 0
+        y      = 12
+        width  = 12
+        height = 6
+        properties = {
+          title   = "Lambda — Throttles"
+          view    = "timeSeries"
+          stacked = false
+          stat    = "Sum"
+          period  = 300
+          region  = var.aws_region
+          metrics = [
+            ["AWS/Lambda", "Throttles", "FunctionName", aws_lambda_function.send_weekly_email.function_name, { label = "WeeklyEmail", color = "#d62728" }],
+            [".", ".", ".", aws_lambda_function.send_daily_sms.function_name, { label = "DailySMS", color = "#ff7f0e" }],
+            [".", ".", ".", aws_lambda_function.confirm_task.function_name, { label = "ConfirmTask", color = "#e377c2" }],
+            [".", ".", ".", aws_lambda_function.verify_delivery.function_name, { label = "VerifyDelivery", color = "#8c564b" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 12
+        width  = 12
+        height = 6
+        properties = {
+          title   = "Lambda — Concurrent Executions"
+          view    = "timeSeries"
+          stacked = true
+          stat    = "Maximum"
+          period  = 60
+          region  = var.aws_region
+          metrics = [
+            ["AWS/Lambda", "ConcurrentExecutions", "FunctionName", aws_lambda_function.send_weekly_email.function_name, { label = "WeeklyEmail" }],
+            [".", ".", ".", aws_lambda_function.send_daily_sms.function_name, { label = "DailySMS" }],
+            [".", ".", ".", aws_lambda_function.confirm_task.function_name, { label = "ConfirmTask" }],
+            [".", ".", ".", aws_lambda_function.verify_delivery.function_name, { label = "VerifyDelivery" }],
+          ]
+        }
+      },
+    ]
+  })
+}
+
+# ---------------------------------------------------------------------------
 # CloudWatch Alarms
 # ---------------------------------------------------------------------------
 
