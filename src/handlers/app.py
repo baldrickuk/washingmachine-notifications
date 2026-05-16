@@ -19,15 +19,11 @@ FROM_EMAIL = os.environ["FROM_EMAIL"]
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
 ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
 
+# --- Twilio (optional SMS provider) ---
 _TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 _TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
 TWILIO_ENABLED = bool(_TWILIO_SID and _TWILIO_TOKEN and TWILIO_FROM_NUMBER)
-
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(TABLE_NAME)
-ses = boto3.client("ses")
-sns = boto3.client("sns")
 
 if TWILIO_ENABLED:
     from twilio.rest import Client as TwilioClient  # pylint: disable=import-error
@@ -35,6 +31,95 @@ if TWILIO_ENABLED:
 else:
     _TWILIO_CLIENT = None
 
+# --- WhatsApp via Meta Cloud API (optional, replaces email + SMS when enabled) ---
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
+WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+WHATSAPP_REMINDER_TEMPLATE = os.environ.get("WHATSAPP_REMINDER_TEMPLATE", "filter_reminder")
+WHATSAPP_ESCALATION_TEMPLATE = os.environ.get("WHATSAPP_ESCALATION_TEMPLATE", "filter_escalation")
+WHATSAPP_CONGRATS_TEMPLATE = os.environ.get("WHATSAPP_CONGRATS_TEMPLATE", "filter_confirmed")
+WHATSAPP_ENABLED = bool(WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN)
+
+dynamodb = boto3.resource("dynamodb")
+table = dynamodb.Table(TABLE_NAME)
+ses = boto3.client("ses")
+sns = boto3.client("sns")
+
+# ---------------------------------------------------------------------------
+# Channel-agnostic notification dispatchers
+# ---------------------------------------------------------------------------
+
+def _notify_initial(confirm_url: str, is_test: bool):
+    """Send the initial weekly reminder via the configured channel."""
+    if WHATSAPP_ENABLED:
+        prefix = "[TEST] " if is_test else ""
+        _send_whatsapp(WHATSAPP_REMINDER_TEMPLATE, [
+            f"{prefix}It's time to clean the washing machine filter! "
+            f"Tap here to confirm once done: {confirm_url}",
+        ])
+    else:
+        _send_email(confirm_url, is_test)
+        _send_nudge_sms(is_test)
+
+
+def _notify_reminder(sms_count: int, sunday: date):
+    """Send an escalating reminder via the configured channel."""
+    if WHATSAPP_ENABLED:
+        _send_whatsapp(WHATSAPP_ESCALATION_TEMPLATE, [_escalating_sms(sms_count, sunday)])
+    else:
+        _send_sms(_escalating_sms(sms_count, sunday))
+
+
+def _notify_congratulations(sms_count: int, animal: str):
+    """Send a congratulations message via the configured channel."""
+    if WHATSAPP_ENABLED:
+        image_url = _fetch_animal_image(animal)
+        body = (
+            f"🎉 {_sms_commentary(sms_count)}\n\n"
+            f"As your reward, please enjoy this {animal}:\n{image_url}"
+            if image_url
+            else f"🎉 {_sms_commentary(sms_count)}"
+        )
+        _send_whatsapp(WHATSAPP_CONGRATS_TEMPLATE, [body])
+    else:
+        _send_congratulations_email(sms_count, animal)
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp — Meta Cloud API
+# ---------------------------------------------------------------------------
+
+def _send_whatsapp(template_name: str, body_params: list):
+    """Send a WhatsApp template message via the Meta Cloud API."""
+    payload = json.dumps({
+        "messaging_product": "whatsapp",
+        "to": WIFE_PHONE.lstrip("+"),
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": "en_GB"},
+            "components": [{
+                "type": "body",
+                "parameters": [{"type": "text", "text": p} for p in body_params],
+            }],
+        },
+    }).encode()
+
+    req = urllib.request.Request(
+        f"https://graph.facebook.com/v20.0/{WHATSAPP_PHONE_NUMBER_ID}/messages",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        print(f"WhatsApp sent via Meta API: {r.read()}")
+
+
+# ---------------------------------------------------------------------------
+# SMS (Twilio or SNS fallback)
+# ---------------------------------------------------------------------------
 
 def _send_sms(body: str):
     if TWILIO_ENABLED:
@@ -66,7 +151,7 @@ def _week_pk(sunday: date, test: bool = False) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Initial SMS nudge — sent alongside the Sunday email
+# Initial SMS nudge — used in email+SMS mode only
 # ---------------------------------------------------------------------------
 
 def _send_nudge_sms(is_test: bool = False):
@@ -83,7 +168,7 @@ def _send_nudge_sms(is_test: bool = False):
 # ---------------------------------------------------------------------------
 
 def send_weekly_email(event, _context):
-    """Send the weekly filter-cleaning reminder email and initial SMS nudge."""
+    """Send the initial weekly filter-cleaning reminder via the configured channel."""
     is_test = bool(event.get("test"))
     now = _now_london()
 
@@ -120,9 +205,8 @@ def send_weekly_email(event, _context):
         f"?week={sunday.isoformat()}&token={token}"
         + ("&test=1" if is_test else "")
     )
-    _send_email(confirm_url, is_test)
-    _send_nudge_sms(is_test)
-    print(f"{'TEST ' if is_test else ''}Email sent for {pk}")
+    _notify_initial(confirm_url, is_test)
+    print(f"{'TEST ' if is_test else ''}Notification sent for {pk}")
 
 
 def _send_email(confirm_url: str, is_test: bool = False):
@@ -194,7 +278,7 @@ def _email_text(confirm_url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Escalating SMS messages (index = number of SMSes already sent this week)
+# Escalating SMS/WhatsApp messages
 # ---------------------------------------------------------------------------
 
 _SMS_MESSAGES = [
@@ -249,11 +333,11 @@ def _escalating_sms(sms_count: int, sunday: date) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Handler: send daily SMS (08:00 UK time) while unconfirmed
+# Handler: send daily SMS/WhatsApp (08:00 UK time) while unconfirmed
 # ---------------------------------------------------------------------------
 
 def send_daily_sms(event, _context):
-    """Send an escalating SMS reminder if this week's task is still pending."""
+    """Send an escalating reminder if this week's task is still pending."""
     is_test = bool(event.get("test"))
     now = _now_london()
 
@@ -280,16 +364,16 @@ def send_daily_sms(event, _context):
         if last_sms_at:
             elapsed = (now - datetime.fromisoformat(last_sms_at)).total_seconds()
             if elapsed < TEST_SMS_INTERVAL_SECONDS:
-                print(f"Test SMS sent {elapsed:.0f}s ago (<10 min), skipping")
+                print(f"Test reminder sent {elapsed:.0f}s ago (<10 min), skipping")
                 return
     else:
         today_str = now.date().isoformat()
         if today_str in item.get("sms_dates", []):
-            print(f"SMS already sent today ({today_str}) for {pk}")
+            print(f"Reminder already sent today ({today_str}) for {pk}")
             return
 
     sms_count = len(item.get("sms_dates", []))
-    _send_sms(_escalating_sms(sms_count, sunday))
+    _notify_reminder(sms_count, sunday)
 
     dedup_value = now.isoformat() if is_test else now.date().isoformat()
     update_expr = "SET sms_dates = :dates" + (", last_sms_at = :last" if is_test else "")
@@ -302,7 +386,7 @@ def send_daily_sms(event, _context):
         UpdateExpression=update_expr,
         ExpressionAttributeValues=expr_values,
     )
-    print(f"{'TEST ' if is_test else ''}SMS #{sms_count + 1} sent for {pk}")
+    print(f"{'TEST ' if is_test else ''}Reminder #{sms_count + 1} sent for {pk}")
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +416,6 @@ def _fetch_animal_image(animal: str) -> str:
             ) as r:
                 return json.loads(r.read())["image"]
 
-        # bunny / anything else — loremflickr follows redirect to a static CDN URL
         search_term = "rabbit" if animal == "bunny" else animal
         req = urllib.request.Request(
             f"https://loremflickr.com/640/480/{search_term}/all",
@@ -393,7 +476,7 @@ def _sms_commentary(sms_count: int) -> str:
 # ---------------------------------------------------------------------------
 
 def confirm_task(event, _context):
-    """Handle confirmation link click — mark task done and send congratulations email."""
+    """Handle confirmation link click — mark task done and send congratulations."""
     params = event.get("queryStringParameters") or {}
     week = params.get("week")
     token = params.get("token")
@@ -429,7 +512,7 @@ def confirm_task(event, _context):
         },
     )
 
-    _send_congratulations_email(sms_count, ANIMAL_TYPE)
+    _notify_congratulations(sms_count, ANIMAL_TYPE)
 
     return _html_response(200, _success_page())
 

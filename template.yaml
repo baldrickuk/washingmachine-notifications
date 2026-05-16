@@ -29,6 +29,27 @@ Parameters:
     Type: String
     Default: ""
     Description: Twilio phone number to send SMS from in E.164 format (optional — SMS disabled if blank)
+  WhatsAppPhoneNumberId:
+    Type: String
+    Default: ""
+    Description: Meta WhatsApp Business phone number ID (optional — enables WhatsApp mode)
+  WhatsAppAccessToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Meta System User access token for WhatsApp Cloud API (optional)
+  WhatsAppReminderTemplate:
+    Type: String
+    Default: filter_reminder
+    Description: Approved Meta template name for the initial Sunday reminder
+  WhatsAppEscalationTemplate:
+    Type: String
+    Default: filter_escalation
+    Description: Approved Meta template name for daily escalation reminders
+  WhatsAppCongratsTemplate:
+    Type: String
+    Default: filter_confirmed
+    Description: Approved Meta template name for the congratulations message
 
 Globals:
   Function:
@@ -44,6 +65,11 @@ Globals:
         TWILIO_ACCOUNT_SID: !Ref TwilioAccountSid
         TWILIO_AUTH_TOKEN: !Ref TwilioAuthToken
         TWILIO_FROM_NUMBER: !Ref TwilioFromNumber
+        WHATSAPP_PHONE_NUMBER_ID: !Ref WhatsAppPhoneNumberId
+        WHATSAPP_ACCESS_TOKEN: !Ref WhatsAppAccessToken
+        WHATSAPP_REMINDER_TEMPLATE: !Ref WhatsAppReminderTemplate
+        WHATSAPP_ESCALATION_TEMPLATE: !Ref WhatsAppEscalationTemplate
+        WHATSAPP_CONGRATS_TEMPLATE: !Ref WhatsAppCongratsTemplate
 
 Resources:
   RemindersTable:
