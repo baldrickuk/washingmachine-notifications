@@ -1,0 +1,13 @@
+# SAM build output
+.aws-sam/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# samconfig contains personal email/phone — keep out of git
+samconfig.toml
