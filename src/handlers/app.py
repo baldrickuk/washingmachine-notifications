@@ -1,5 +1,7 @@
+"""Lambda handlers for the washing machine filter reminder system."""
 import json
 import os
+import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime, date, timedelta
@@ -28,15 +30,15 @@ ses = boto3.client("ses")
 sns = boto3.client("sns")
 
 if TWILIO_ENABLED:
-    from twilio.rest import Client as TwilioClient
-    twilio = TwilioClient(_TWILIO_SID, _TWILIO_TOKEN)
+    from twilio.rest import Client as TwilioClient  # pylint: disable=import-error
+    _TWILIO_CLIENT = TwilioClient(_TWILIO_SID, _TWILIO_TOKEN)
 else:
-    twilio = None
+    _TWILIO_CLIENT = None
 
 
 def _send_sms(body: str):
     if TWILIO_ENABLED:
-        twilio.messages.create(to=WIFE_PHONE, from_=TWILIO_FROM_NUMBER, body=body)
+        _TWILIO_CLIENT.messages.create(to=WIFE_PHONE, from_=TWILIO_FROM_NUMBER, body=body)
         print("SMS sent via Twilio")
     else:
         sns.publish(
@@ -80,7 +82,8 @@ def _send_nudge_sms(is_test: bool = False):
 # Handler: send weekly email (Sunday 09:00 UK time)
 # ---------------------------------------------------------------------------
 
-def send_weekly_email(event, context):
+def send_weekly_email(event, _context):
+    """Send the weekly filter-cleaning reminder email and initial SMS nudge."""
     is_test = bool(event.get("test"))
     now = _now_london()
 
@@ -94,7 +97,6 @@ def send_weekly_email(event, context):
     existing = table.get_item(Key={"PK": pk}).get("Item")
     if existing:
         if is_test:
-            # Reset test state so each test run starts from SMS #1
             table.delete_item(Key={"PK": pk})
             print(f"Cleared previous test record {pk}")
         else:
@@ -145,7 +147,8 @@ def _send_email(confirm_url: str, is_test: bool = False):
 def _email_html(confirm_url: str, is_test: bool = False) -> str:
     test_banner = (
         '<div style="background:#ff9800;color:#fff;padding:10px;text-align:center;'
-        'font-weight:bold;border-radius:6px 6px 0 0;">TEST MODE — SMS reminders every 10 minutes</div>'
+        'font-weight:bold;border-radius:6px 6px 0 0;">'
+        "TEST MODE — SMS reminders every 10 minutes</div>"
         if is_test else ""
     )
     return f"""<!DOCTYPE html>
@@ -249,7 +252,8 @@ def _escalating_sms(sms_count: int, sunday: date) -> str:
 # Handler: send daily SMS (08:00 UK time) while unconfirmed
 # ---------------------------------------------------------------------------
 
-def send_daily_sms(event, context):
+def send_daily_sms(event, _context):
+    """Send an escalating SMS reminder if this week's task is still pending."""
     is_test = bool(event.get("test"))
     now = _now_london()
 
@@ -285,14 +289,12 @@ def send_daily_sms(event, context):
             return
 
     sms_count = len(item.get("sms_dates", []))
-    message = _escalating_sms(sms_count, sunday)
-    _send_sms(message)
+    _send_sms(_escalating_sms(sms_count, sunday))
 
     dedup_value = now.isoformat() if is_test else now.date().isoformat()
-    update_expr = "SET sms_dates = :dates"
+    update_expr = "SET sms_dates = :dates" + (", last_sms_at = :last" if is_test else "")
     expr_values: dict = {":dates": list(item.get("sms_dates", [])) + [dedup_value]}
     if is_test:
-        update_expr += ", last_sms_at = :last"
         expr_values[":last"] = now.isoformat()
 
     table.update_item(
@@ -318,28 +320,28 @@ def _fetch_animal_image(animal: str) -> str:
             ) as r:
                 return json.loads(r.read())[0]["url"]
 
-        elif animal == "dog":
+        if animal == "dog":
             with urllib.request.urlopen(
                 "https://dog.ceo/api/breeds/image/random", timeout=5
             ) as r:
                 return json.loads(r.read())["message"]
 
-        elif animal == "fox":
+        if animal == "fox":
             with urllib.request.urlopen(
                 "https://randomfox.ca/floof/", timeout=5
             ) as r:
                 return json.loads(r.read())["image"]
 
-        else:  # bunny / anything else — loremflickr follows redirect to a static CDN URL
-            search_term = "rabbit" if animal == "bunny" else animal
-            req = urllib.request.Request(
-                f"https://loremflickr.com/640/480/{search_term}/all",
-                headers={"User-Agent": "WashingMachineReminder/1.0"},
-            )
-            with urllib.request.urlopen(req, timeout=5) as r:
-                return r.url
+        # bunny / anything else — loremflickr follows redirect to a static CDN URL
+        search_term = "rabbit" if animal == "bunny" else animal
+        req = urllib.request.Request(
+            f"https://loremflickr.com/640/480/{search_term}/all",
+            headers={"User-Agent": "WashingMachineReminder/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.url
 
-    except Exception as exc:
+    except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError) as exc:
         print(f"Could not fetch {animal} image: {exc}")
         return ""
 
@@ -361,33 +363,37 @@ def _sms_commentary(sms_count: int) -> str:
             "An absolute titan of domestic responsibility. "
             "A legend in your own lifetime."
         )
-    elif sms_count == 1:
+    if sms_count == 1:
         return "It took one gentle nudge. Honestly, practically immediate. Well done."
-    elif sms_count == 2:
-        return "Two reminders. That is basically the same as doing it straight away. We respect the process."
-    elif sms_count <= 4:
+    if sms_count == 2:
+        return (
+            "Two reminders. That is basically the same as doing it "
+            "straight away. We respect the process."
+        )
+    if sms_count <= 4:
         return (
             f"After {sms_count} reminders, the deed is done. "
             "The filter exhales. The household is at peace."
         )
-    elif sms_count <= 6:
+    if sms_count <= 6:
         return (
             f"It took {sms_count} increasingly concerned messages, but justice has prevailed. "
-            "The filter's legal team has been stood down. The washing machine has called off the work-to-rule."
+            "The filter's legal team has been stood down. "
+            "The washing machine has called off the work-to-rule."
         )
-    else:
-        return (
-            f"After {sms_count} days of escalating crisis — including industrial action, "
-            "a press conference, and the filter writing its will — the task is complete. "
-            "The filter has dropped all charges. History will remember this day."
-        )
+    return (
+        f"After {sms_count} days of escalating crisis — including industrial action, "
+        "a press conference, and the filter writing its will — the task is complete. "
+        "The filter has dropped all charges. History will remember this day."
+    )
 
 
 # ---------------------------------------------------------------------------
 # Handler: confirm task via link click
 # ---------------------------------------------------------------------------
 
-def confirm_task(event, context):
+def confirm_task(event, _context):
+    """Handle confirmation link click — mark task done and send congratulations email."""
     params = event.get("queryStringParameters") or {}
     week = params.get("week")
     token = params.get("token")
@@ -430,17 +436,21 @@ def confirm_task(event, context):
 
 def _send_congratulations_email(sms_count: int, animal: str):
     image_url = _fetch_animal_image(animal)
-    commentary = _sms_commentary(sms_count)
-    caption = _animal_caption(animal)
-
     ses.send_email(
         Source=FROM_EMAIL,
         Destination={"ToAddresses": [WIFE_EMAIL]},
         Message={
             "Subject": {"Data": "Filter cleaned! Here is your reward 🎉"},
             "Body": {
-                "Html": {"Data": _congratulations_html(commentary, caption, image_url, animal)},
-                "Text": {"Data": f"Congratulations! {commentary} Your reward awaits: {image_url}"},
+                "Html": {"Data": _congratulations_html(
+                    _sms_commentary(sms_count),
+                    _animal_caption(animal),
+                    image_url,
+                    animal,
+                )},
+                "Text": {"Data": (
+                    f"Congratulations! {_sms_commentary(sms_count)} Your reward: {image_url}"
+                )},
             },
         },
     )
