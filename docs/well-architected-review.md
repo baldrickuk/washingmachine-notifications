@@ -11,12 +11,33 @@
 ## Executive Summary
 
 ```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'xyChart': {'backgroundColor': '#0d1117', 'plotColorPalette': '#58a6ff'}}}}%%
-xychart-beta
-    title "Well-Architected Pillar Scores (out of 5)"
-    x-axis ["Operational Excellence", "Security", "Reliability", "Performance Efficiency", "Cost Optimization", "Sustainability"]
-    y-axis "Score" 0 --> 5
-    bar [4, 5, 4, 4, 5, 3]
+%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'clusterBkg': '#0d1117', 'clusterBorder': '#30363d'}}}%%
+
+flowchart LR
+    subgraph t5 ["★★★★★  5 / 5"]
+        SEC["🔒 Security\n─────────────\nAll findings resolved\nThreat model current"]
+        COST["💰 Cost Optimization\n─────────────\nEffectively free\n~$0.40/month"]
+    end
+
+    subgraph t4 ["★★★★☆  4 / 5"]
+        OPS["⚙️ Operational Excellence\n─────────────\nIaC, DLQ and alarms in place\nTests and CI/CD outstanding"]
+        REL["🔄 Reliability\n─────────────\nDLQ and alerting resolved\nPost-deploy check outstanding"]
+        PERF["⚡ Performance Efficiency\n─────────────\nWell-optimised\nARM switch pending"]
+    end
+
+    subgraph t3 ["★★★☆☆  3 / 5"]
+        SUS["🌱 Sustainability\n─────────────\nServerless near-zero idle\nARM Graviton2 not yet used"]
+    end
+
+    style t5 fill:#0d2a0d,stroke:#2a7a2a,color:#c9d1d9
+    style t4 fill:#0d1a2a,stroke:#2a5a8a,color:#c9d1d9
+    style t3 fill:#2a1a0d,stroke:#8a5a2a,color:#c9d1d9
+    style SEC  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
+    style COST fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
+    style OPS  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
+    style REL  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
+    style PERF fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
+    style SUS  fill:#3a2a1a,stroke:#8a6a3a,color:#e0c0a0
 ```
 
 | Pillar | Score | HRI | MRI | Status |
