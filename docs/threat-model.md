@@ -46,7 +46,8 @@ flowchart TD
             SM[("washingmachine-notifications/secrets\ntwilio_auth_token\nwhatsapp_access_token")]
         end
 
-        subgraph apigw ["API Gateway"]
+        subgraph edge ["CloudFront + API Gateway"]
+            CF["CloudFront\nGB whitelist\n(non-GB → 403)"]
             GW["GET /confirm\n(throttled: 5 req/s · burst 10)"]
         end
     end
@@ -69,7 +70,8 @@ flowchart TD
     SES -->|"SMTP/TLS"| USER
     TWILIO -->|"SMPP"| USER
     WA -->|"HTTPS"| USER
-    USER -->|"HTTPS GET\n?week=…&token=…"| GW
+    USER -->|"HTTPS GET\n?week=…&token=…"| CF
+    CF -->|"GB only\nothers → 403"| GW
     GW -->|"invoke\n(rate limited)"| L3
     L3 -->|"send congratulations"| SES
 
@@ -83,22 +85,25 @@ flowchart TD
 
 ## STRIDE Analysis
 
-### Component: API Gateway — `GET /confirm`
+### Component: CloudFront + API Gateway — `GET /confirm`
 
-The only internet-facing surface. Accepts `week` and `token` query parameters from anyone. Rate limited at 5 req/s with a burst of 10.
+The only internet-facing surface. Requests pass through CloudFront (GB geo restriction) before reaching API Gateway (5 req/s rate limit). Non-GB requests are rejected at the CDN edge and never reach the origin.
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
 
 flowchart LR
-    A["Attacker sends\nGET /confirm\n?week=X&token=Y"] --> RL{Under rate\nlimit?}
+    A["Attacker sends\nGET /confirm\n?week=X&token=Y"] --> GEO{Origin\ncountry GB?}
+    GEO -- No --> R403GEO["403 — blocked\nby CloudFront\n(never reaches origin)"]
+    GEO -- Yes --> RL{Under rate\nlimit?}
     RL -- No --> R429["429 — throttled\nby API Gateway"]
     RL -- Yes --> B{Token valid?}
-    B -- No --> C["403 — rejected"]
+    B -- No --> C["403 — rejected\nby Lambda"]
     B -- Yes --> D{Already confirmed?}
     D -- Yes --> E["200 — idempotent\nno state change"]
     D -- No --> F["Mark CONFIRMED\nSend congratulations"]
 
+    style R403GEO fill:#3a1a1a,stroke:#7a2a2a,color:#e0a0a0
     style R429 fill:#3a1a1a,stroke:#7a2a2a,color:#e0a0a0
     style C fill:#3a1a1a,stroke:#7a2a2a,color:#e0a0a0
     style E fill:#1a2a3a,stroke:#2a5a7a,color:#a0c0e0
@@ -107,12 +112,13 @@ flowchart LR
 
 | Threat | Description | Likelihood | Impact | Mitigation |
 |--------|-------------|:----------:|:------:|------------|
-| **S** Spoofing token | Attacker guesses or brutes a valid `?token=` | 🟢 Very Low | 🟡 Medium | UUID v4 = 122 bits entropy. At 10,000 req/s it would take ~5 × 10²⁷ years. Comfortable. |
+| **S** Spoofing token | Attacker guesses or brutes a valid `?token=` | 🟢 Very Low | 🟡 Medium | UUID v4 = 122 bits entropy. Non-GB attackers blocked at CloudFront before they can even try. |
 | **T** Parameter tampering | Manipulating `week` or `token` values | 🟢 Very Low | 🟢 Low | Invalid combinations return 403/404; no state is changed |
 | **R** Repudiation | No proof of who clicked the link | 🟡 Medium | 🟡 Medium | `confirmed_at` timestamp written to DynamoDB; CloudWatch logs record the Lambda invocation |
 | **I** Information disclosure | Error pages leaking internals | 🟢 Very Low | 🟢 Low | HTML error pages return no stack traces or internal details |
-| **D** Denial of service | Flooding the `/confirm` endpoint | ✅ ~~Medium~~ → Very Low | 🟢 Low | **Resolved (finding #2):** Rate limited to 5 req/s sustained, burst of 10. Requests over limit return 429 before Lambda is invoked. |
+| **D** Denial of service | Flooding the `/confirm` endpoint | ✅ ~~Medium~~ → Very Low | 🟢 Low | **Resolved (finding #2 + geo):** Non-GB traffic blocked at CloudFront edge. GB traffic rate limited to 5 req/s, burst 10. |
 | **E** Elevation of privilege | Gaining broader AWS access via the endpoint | 🟢 Very Low | 🔴 High | `ConfirmTask` IAM role scoped to DDB actions on one table, `ses:SendEmail`, and `secretsmanager:GetSecretValue` on one secret |
+| **D** Geo bypass | Attacker uses GB-based VPN or proxy | 🟡 Medium | 🟢 Low | Acceptable residual risk — token brute force remains infeasible regardless of origin country; geo restriction reduces noise, not a cryptographic guarantee |
 
 ---
 
@@ -200,8 +206,8 @@ quadrantChart
     quadrant-3 Accept
     quadrant-4 Mitigate
 
-    Token brute force: [0.10, 0.05]
-    API Gateway DoS ✅: [0.20, 0.15]
+    Token brute force: [0.10, 0.03]
+    API Gateway DoS ✅: [0.20, 0.10]
     Email link interception: [0.42, 0.40]
     Credential exposure ✅: [0.75, 0.10]
     Lambda code tampering: [0.80, 0.08]
@@ -284,8 +290,8 @@ flowchart TD
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff'}}}%%
 
 pie title Security controls in place
-    "Strong (token auth, IAM least-privilege, HTTPS, TTL, Secrets Manager, rate limiting)" : 70
-    "Adequate (CloudWatch logging, idempotent confirmation, NoEcho params)" : 20
+    "Strong (token auth, IAM least-privilege, HTTPS, TTL, Secrets Manager, rate limiting, geo restriction)" : 75
+    "Adequate (CloudWatch logging, idempotent confirmation, NoEcho params)" : 15
     "Needs improvement (DynamoDB audit log, PII in env vars)" : 10
 ```
 
@@ -293,10 +299,11 @@ pie title Security controls in place
 |------|--------|
 | Authentication | ✅ UUID v4 token — cryptographically strong |
 | Authorisation | ✅ IAM roles scoped to minimum required actions |
-| Encryption in transit | ✅ HTTPS enforced on API Gateway; SES uses TLS |
+| Encryption in transit | ✅ HTTPS enforced on CloudFront and API Gateway; SES uses TLS |
 | Encryption at rest | ✅ DynamoDB encrypted at rest by default |
 | Secrets management | ✅ Auth tokens in Secrets Manager — not in Lambda env vars |
 | Rate limiting | ✅ `/confirm` throttled to 5 req/s, burst 10 |
+| Geo restriction | ✅ CloudFront GB-only whitelist — non-GB requests blocked at the edge |
 | Audit logging | ⚠️ CloudWatch logs Lambda; DynamoDB data events not enabled |
 | PII protection | ⚠️ Email and phone in Lambda env vars — restrict `GetFunctionConfiguration` |
 | Input validation | ✅ `week` parsed as ISO date; token compared server-side |
@@ -304,4 +311,4 @@ pie title Security controls in place
 
 ---
 
-*Threat model version 1.1 — May 2026. Findings #1 and #2 resolved. Review annually or when the architecture changes materially. Or when the filter starts answering back.*
+*Threat model version 1.2 — May 2026. Findings #1 and #2 resolved. CloudFront GB geo restriction added. Review annually or when the architecture changes materially. Or when the filter starts answering back.*

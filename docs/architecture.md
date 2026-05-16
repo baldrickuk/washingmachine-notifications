@@ -27,8 +27,9 @@ graph LR
         SM[("Secrets Manager\n─────────────\ntwilio_auth_token\nwhatsapp_access_token")]
     end
 
-    subgraph api ["  API Gateway  "]
-        GW["HTTP API\nGET /confirm\n─────────────\n5 req/s · burst 10"]
+    subgraph edge ["  Edge  "]
+        CF["CloudFront\nGB-only whitelist\n─────────────\nPriceClass_100"]
+        GW["API Gateway HTTP API\nGET /confirm\n─────────────\n5 req/s · burst 10"]
     end
 
     subgraph channel ["  Notification Channel  "]
@@ -58,7 +59,8 @@ graph LR
     SES --> EM
     TW --> PH
     WA --> PH
-    EM -->|"clicks link"| GW
+    EM -->|"clicks link"| CF
+    CF -->|"GB allowed\nothers → 403"| GW
     GW -->|"invoke\n(throttled)"| L3
 
     classDef schedule fill:#1a3a5c,stroke:#4a7ab5,color:#a0c4e8,rx:6
@@ -66,6 +68,7 @@ graph LR
     classDef storage fill:#3a2a1e,stroke:#8a5a2a,color:#d0a070
     classDef secret fill:#2a1e3a,stroke:#6a4a8a,color:#c090d0
     classDef messaging fill:#2a1a3a,stroke:#6a3a8a,color:#b070d0
+    classDef edge fill:#1a3a3a,stroke:#3a7a7a,color:#70d0d0
     classDef gateway fill:#1a2a3a,stroke:#3a5a7a,color:#70a0c0
     classDef person fill:#2a2a2a,stroke:#5a5a5a,color:#c0c0c0
 
@@ -74,6 +77,7 @@ graph LR
     class DB storage
     class SM secret
     class SES,TW,WA messaging
+    class CF edge
     class GW gateway
     class EM,PH person
 ```
@@ -89,7 +93,8 @@ graph LR
 | **DynamoDB** | Single table, PAY_PER_REQUEST | Tracks weekly task state (30-day TTL) |
 | **Secrets Manager** | `washingmachine-notifications/secrets` | Stores Twilio and WhatsApp credentials |
 | **SES** | Email via verified identity | Sends reminder and congratulations emails |
-| **API Gateway** | HTTP API, `GET /confirm`, throttled 5 req/s | Serves the confirmation link |
+| **CloudFront** | Distribution, `PriceClass_100`, GB whitelist | GB-only geo restriction at the CDN edge — non-GB requests never reach the origin |
+| **API Gateway** | HTTP API, `GET /confirm`, throttled 5 req/s | Confirmation link origin behind CloudFront |
 | **IAM** | Single shared role | Least-privilege access to DDB, SES, Secrets Manager |
 
 ---
@@ -204,32 +209,39 @@ flowchart TD
 
 ## Confirmation Flow
 
-When the recipient clicks the confirmation link, API Gateway (throttled at 5 req/s) invokes `ConfirmTask`. The link is valid for 30 days; clicking it again after confirmation is a no-op.
+When the recipient clicks the confirmation link it passes through CloudFront (GB geo check) then API Gateway (rate limit) before invoking `ConfirmTask`. The link is valid for 30 days; clicking it again after confirmation is a no-op.
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
 
 sequenceDiagram
     actor W  as Recipient
+    participant CF as CloudFront<br/>(GB whitelist)
     participant GW as API Gateway<br/>(5 req/s throttle)
     participant L  as ConfirmTask λ
     participant DB as DynamoDB
     participant CH as Channel (SES / WhatsApp)
 
-    W->>GW: GET /confirm?week=2026-05-17&token=uuid
-    GW->>L: Invoke with query params
-    activate L
+    W->>CF: GET /confirm?week=2026-05-17&token=uuid
+    alt Origin not GB
+        CF-->>W: 403 Forbidden
+    else Origin is GB
+        CF->>GW: Forward request
+        GW->>L: Invoke with query params
+        activate L
 
-    L->>DB: GetItem WEEK#2026-05-17
-    DB-->>L: {status: PENDING, token: "uuid", ...}
+        L->>DB: GetItem WEEK#2026-05-17
+        DB-->>L: {status: PENDING, token: "uuid", ...}
 
-    L->>L: Validate token matches
-    L->>DB: UpdateItem — status=CONFIRMED, confirmed_at=now
-    L->>CH: _notify_congratulations(sms_count, animal)
+        L->>L: Validate token matches
+        L->>DB: UpdateItem — status=CONFIRMED, confirmed_at=now
+        L->>CH: _notify_congratulations(sms_count, animal)
 
-    L-->>GW: 200 HTML — "All done! ✅"
-    deactivate L
-    GW-->>W: Success page + congratulations message
+        L-->>GW: 200 HTML — "All done! ✅"
+        deactivate L
+        GW-->>CF: 200 response
+        CF-->>W: Success page + congratulations message
+    end
 
     Note over W,DB: SendDailySMS now sees CONFIRMED<br/>and stops sending reminders
 ```
