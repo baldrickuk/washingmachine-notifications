@@ -207,15 +207,15 @@ quadrantChart
     quadrant-4 Mitigate
 
     Token brute force: [0.10, 0.03]
-    API Gateway DoS (resolved): [0.20, 0.10]
+    API Gateway DoS: [0.20, 0.10]
     Email link interception: [0.42, 0.40]
-    Credential exposure (resolved): [0.75, 0.10]
+    Credential exposure: [0.75, 0.10]
     Lambda code tampering: [0.80, 0.08]
     Email spoofing: [0.40, 0.50]
     No DynamoDB audit log: [0.38, 0.55]
     Link forwarding: [0.15, 0.55]
     PII in Lambda env: [0.40, 0.45]
-    SM in CloudFormation events: [0.65, 0.45]
+    SM in CloudFormation: [0.65, 0.45]
 ```
 
 ---
