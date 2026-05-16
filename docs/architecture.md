@@ -245,14 +245,14 @@ One record per week. The partition key encodes the task type and date, making lo
 
 erDiagram
     REMINDERS_TABLE {
-        string PK           "WEEK#YYYY-MM-DD (prod) or TEST#YYYY-MM-DD (test)"
-        string status       "PENDING or CONFIRMED"
-        string token        "UUID — validates confirmation link"
-        string email_sent_at "ISO-8601 timestamp"
-        list   sms_dates    "ISO dates (prod) or ISO timestamps (test)"
-        string last_sms_at  "ISO timestamp — test mode dedup only"
-        string confirmed_at "ISO-8601 timestamp — present when CONFIRMED"
-        number ttl          "Unix epoch — DynamoDB auto-expires after 30 days"
+        string partition_key    "WEEK-YYYY-MM-DD (prod) or TEST-YYYY-MM-DD (test)"
+        string status           "PENDING or CONFIRMED"
+        string token            "UUID - validates confirmation link"
+        string email_sent_at    "ISO-8601 timestamp"
+        string sms_dates        "List of ISO dates (prod) or timestamps (test)"
+        string last_sms_at      "ISO timestamp - test mode dedup only"
+        string confirmed_at     "ISO-8601 timestamp - present when CONFIRMED"
+        number ttl              "Unix epoch - DynamoDB auto-expires after 30 days"
     }
 ```
 
