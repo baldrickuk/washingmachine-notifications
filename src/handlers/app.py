@@ -8,6 +8,7 @@ from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 
 import boto3
+from botocore.exceptions import ClientError
 
 LONDON_TZ = ZoneInfo("Europe/London")
 TEST_SMS_INTERVAL_SECONDS = 600  # 10 minutes
@@ -19,9 +20,25 @@ FROM_EMAIL = os.environ["FROM_EMAIL"]
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
 ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
 
+# --- Secrets Manager (fetched once at cold start, cached for Lambda lifetime) ---
+def _load_secrets() -> dict:
+    """Fetch sensitive credentials from Secrets Manager."""
+    arn = os.environ.get("SECRETS_ARN", "")
+    if not arn:
+        return {}
+    try:
+        client = boto3.client("secretsmanager")
+        response = client.get_secret_value(SecretId=arn)
+        return json.loads(response["SecretString"])
+    except (ClientError, json.JSONDecodeError, KeyError) as exc:
+        print(f"Warning: could not load secrets from Secrets Manager: {exc}")
+        return {}
+
+_SECRETS = _load_secrets()
+
 # --- Twilio (optional SMS provider) ---
 _TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-_TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN", "")
+_TWILIO_TOKEN = _SECRETS.get("twilio_auth_token") or os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
 TWILIO_ENABLED = os.environ.get("TWILIO_ENABLED", "false").lower() == "true"
 
@@ -33,7 +50,9 @@ else:
 
 # --- WhatsApp via Meta Cloud API (optional, replaces email + SMS when enabled) ---
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
-WHATSAPP_ACCESS_TOKEN = os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+WHATSAPP_ACCESS_TOKEN = (
+    _SECRETS.get("whatsapp_access_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+)
 WHATSAPP_REMINDER_TEMPLATE = os.environ.get("WHATSAPP_REMINDER_TEMPLATE", "filter_reminder")
 WHATSAPP_ESCALATION_TEMPLATE = os.environ.get("WHATSAPP_ESCALATION_TEMPLATE", "filter_escalation")
 WHATSAPP_CONGRATS_TEMPLATE = os.environ.get("WHATSAPP_CONGRATS_TEMPLATE", "filter_confirmed")

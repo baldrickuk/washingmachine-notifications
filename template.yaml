@@ -68,14 +68,13 @@ Globals:
         FROM_EMAIL: !Ref FromEmail
         ANIMAL_TYPE: !Ref AnimalType
         TWILIO_ACCOUNT_SID: !Ref TwilioAccountSid
-        TWILIO_AUTH_TOKEN: !Ref TwilioAuthToken
         TWILIO_FROM_NUMBER: !Ref TwilioFromNumber
         TWILIO_ENABLED: !Ref TwilioEnabled
         WHATSAPP_PHONE_NUMBER_ID: !Ref WhatsAppPhoneNumberId
-        WHATSAPP_ACCESS_TOKEN: !Ref WhatsAppAccessToken
         WHATSAPP_REMINDER_TEMPLATE: !Ref WhatsAppReminderTemplate
         WHATSAPP_ESCALATION_TEMPLATE: !Ref WhatsAppEscalationTemplate
         WHATSAPP_CONGRATS_TEMPLATE: !Ref WhatsAppCongratsTemplate
+        SECRETS_ARN: !Ref AppSecrets
 
 Resources:
   RemindersTable:
@@ -120,9 +119,27 @@ Resources:
               - Effect: Allow
                 Action: ses:SendEmail
                 Resource: '*'
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref AppSecrets
+
+  AppSecrets:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${AWS::StackName}/secrets"
+      Description: Sensitive API credentials — Twilio and WhatsApp tokens
+      SecretString: !Sub |
+        {
+          "twilio_auth_token": "${TwilioAuthToken}",
+          "whatsapp_access_token": "${WhatsAppAccessToken}"
+        }
 
   ConfirmApi:
     Type: AWS::Serverless::HttpApi
+    Properties:
+      DefaultRouteSettings:
+        ThrottlingRateLimit: 5
+        ThrottlingBurstLimit: 10
 
   SendWeeklyEmailFunction:
     Type: AWS::Serverless::Function
