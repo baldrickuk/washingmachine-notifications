@@ -46,7 +46,7 @@ flowchart LR
 | Sustainability | 4/5 | 0 | 0 | ✅ Graviton2 active — resource tagging outstanding |
 | **Overall** | **4.8/5** | **0** | **0** | |
 
-**Key message:** All High, Medium, and most Low Risk Issues are now resolved. The only remaining open item is resource tagging (SUS-2). The workload is in excellent shape for its risk profile.
+**Key message:** All findings are resolved. Zero open items. The workload is in excellent shape for its risk profile — which is impressive for a system whose entire purpose is reminding someone to clean a filter.
 
 ---
 
@@ -254,7 +254,7 @@ pie title Monthly cost breakdown (~$0.40 total)
 | # | Finding | Risk | Recommendation |
 |---|---------|:----:|----------------|
 | SUS-1 | **Lambda on x86 architecture** — ARM (Graviton2) processors are ~60% more energy-efficient per unit of compute than equivalent x86 | ✅ ~~Medium~~ | Resolved — all functions now on `arm64` Graviton2. Single most impactful sustainability improvement delivered. |
-| SUS-2 | **No resource tagging** — AWS Customer Carbon Footprint Tool and cost allocation reports require consistent tagging | 🟢 Low | Add stack-level tags: `Project`, `Environment`, `Owner`. In SAM, use the `Tags` section under `Globals`. |
+| SUS-2 | **No resource tagging** — AWS Customer Carbon Footprint Tool and cost allocation reports require consistent tagging | ✅ ~~Low~~ | Resolved — `provider "aws" default_tags` in Terraform applies `Project`, `Environment`, and `ManagedBy=opentofu` to every taggable resource automatically. Confirmed live on all deployed resources. |
 
 ### Current Sustainability Strengths
 
@@ -297,7 +297,7 @@ gantt
     PERF-4  Per-function timeout tuning           :done, 2026-06-09, 1d
     OE-6    CloudWatch dashboard                  :done, 2026-06-10, 1d
     SEC-6   Narrow SES IAM to identity ARN        :done, 2026-06-12, 1d
-    SUS-2   Resource tagging                      :2026-06-14, 1d
+    SUS-2   Resource tagging via default_tags      :done, 2026-06-14, 1d
 ```
 
 ### Quick wins (under 30 minutes each)
@@ -363,10 +363,10 @@ flowchart LR
 |---|---|
 | 🔴 High Risk Issues | 0 (4 resolved) |
 | 🟡 Medium Risk Issues | 0 (9 resolved) |
-| 🟢 Low Risk Issues | 1 open — SUS-2 resource tagging (4 resolved) |
-| ✅ Resolved | 17 |
+| 🟢 Low Risk Issues | 0 open (5 resolved) |
+| ✅ Resolved | 18 |
 | Accepted (out of scope for risk profile) | 2 (single region, VPC) |
 
 ---
 
-*Review conducted against the AWS Well-Architected Framework (2024 edition). 17 of 18 findings resolved. One open item: resource tagging (SUS-2, low priority). The filter, for its part, has no architectural concerns.*
+*Review conducted against the AWS Well-Architected Framework (2024 edition). 18 of 18 findings resolved. Zero open items. The filter, for its part, has no architectural concerns — and neither does anyone else.*
