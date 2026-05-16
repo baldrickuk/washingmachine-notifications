@@ -21,10 +21,12 @@ Hope was not enough.
 
 Rather than have a single, normal conversation like a well-adjusted adult, I built a serverless AWS notification pipeline with:
 
-- **Automated weekly emails** with a confirmation link
-- **Daily SMS reminders** that grow progressively more unhinged if ignored
+- **Automated weekly emails** with a confirmation link and an SMS nudge to actually open it
+- **Daily escalating reminders** that grow progressively more unhinged if ignored
+- **A congratulations email** featuring a random animal photo upon confirmation
 - **A DynamoDB table** to track the emotional journey
-- **API Gateway** so that clicking a button in an email triggers a Lambda function, updates a database record, and stops the suffering
+- **CloudFront with GB-only geo restriction**, because the filter is not going to clean itself from abroad
+- **AWS Secrets Manager**, because enterprise security practices apply even to laundry
 
 The filter is cleaned. The marriage survives. The cloud bill is negligible.
 
@@ -32,9 +34,9 @@ The filter is cleaned. The marriage survives. The cloud bill is negligible.
 
 ## How It Works
 
-Every Sunday at 09:00, your chosen recipient gets a polite email asking them to clean the filter and click a confirmation link.
+Every Sunday at 09:00 UK time, the recipient gets an email asking them to clean the filter and click a confirmation link. An SMS nudge fires simultaneously to make sure the email doesn't languish unread.
 
-If they confirm — lovely. Everyone goes about their day.
+If they confirm — lovely. Everyone goes about their day. A congratulations email arrives with a picture of a bunny.
 
 If they do not confirm, the system begins its *escalation protocol*:
 
@@ -54,14 +56,17 @@ If they do not confirm, the system begins its *escalation protocol*:
 
 ## Architecture
 
-For those who would like to understand the full technical horror of what has been built, please see [`docs/architecture.md`](docs/architecture.md), which contains no fewer than eight Mermaid diagrams, a state machine, and an entity-relationship diagram for a table with one row per week.
+For those who would like to understand the full technical horror of what has been built, please consult [`docs/architecture.md`](docs/architecture.md) and [`docs/threat-model.md`](docs/threat-model.md), which between them contain more Mermaid diagrams than any washing machine reminder system has any right to.
 
 The short version:
 
 ```
-EventBridge → Lambda → DynamoDB → SES → Wife's inbox
-                                → SNS → Wife's phone (increasingly)
-                    API Gateway → Lambda → DynamoDB (when she finally clicks the link)
+EventBridge → Lambda → DynamoDB → SES → Recipient's inbox
+                               → Twilio (optional SMS)
+                               → Meta Cloud API (optional WhatsApp)
+           Secrets Manager → Lambda (credentials, fetched at cold start)
+Recipient clicks link → CloudFront (GB-only) → API Gateway → Lambda → DynamoDB
+                                                                     → SES (congratulations + bunny)
 ```
 
 ---
@@ -72,8 +77,7 @@ EventBridge → Lambda → DynamoDB → SES → Wife's inbox
 
 - An AWS account
 - The AWS CLI and SAM CLI installed
-- A verified SES email address (see [AWS docs](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html))
-- A phone number to receive SMS messages
+- A verified SES sender email address (see [AWS docs](https://docs.aws.amazon.com/ses/latest/dg/creating-identities.html))
 - The wisdom to know you've gone too far, and the courage to deploy anyway
 
 ### Deploy
@@ -90,7 +94,6 @@ cp samconfig.toml.example samconfig.toml
 #   WifePhone    — mobile number in E.164 format (+447...)
 #   FromEmail    — your verified SES sender address
 
-# Build and deploy
 sam build && sam deploy
 ```
 
@@ -98,11 +101,17 @@ That's it. The system will now operate autonomously every Sunday until the filte
 
 ### One-time AWS setup
 
-Before your first deploy, you'll need to:
-
 1. **Verify your sender email** in SES → Verified identities
-2. **Request SES production access** if you want to send to unverified addresses (i.e. your wife's actual inbox rather than a sandboxed test address)
-3. **Check your SNS SMS spend limit** — the default is $1/month, which is plenty for one household but worth confirming
+2. **Request SES production access** so you can send to any address without pre-verification (`aws sesv2 put-account-details` or via the AWS Console)
+3. **Verify the recipient's email** in SES if still in sandbox mode
+
+### Optional: SMS reminders
+
+Set `TwilioEnabled=true` in `samconfig.toml` and provide `TwilioAccountSid`, `TwilioAuthToken`, and `TwilioFromNumber`. Credentials are stored in AWS Secrets Manager automatically on deploy — never in Lambda environment variables.
+
+### Optional: WhatsApp (replaces email and SMS)
+
+Set `WhatsAppPhoneNumberId` and `WhatsAppAccessToken`. Requires a Meta WhatsApp Business account and three pre-approved message templates (`filter_reminder`, `filter_escalation`, `filter_confirmed`). See `docs/architecture.md` for details.
 
 ---
 
@@ -111,14 +120,21 @@ Before your first deploy, you'll need to:
 A test mode is included so you can verify the system works without waiting until Sunday, or until you've ignored something for nine days.
 
 ```bash
+# Get the deployed function name
+FUNC=$(aws lambda list-functions --profile dev --region eu-west-2 \
+  --query 'Functions[?contains(FunctionName,`SendWeeklyEmail`)].FunctionName' \
+  --output text)
+
 # Fire the test email immediately
+echo '{"test": true}' > /tmp/payload.json
 aws lambda invoke \
-  --function-name washingmachine-notifications-SendWeeklyEmailFunction \
-  --payload '{"test": true}' \
-  --profile dev /dev/stdout
+  --function-name $FUNC \
+  --payload file:///tmp/payload.json \
+  --profile dev --region eu-west-2 \
+  --cli-binary-format raw-in-base64-out /dev/stdout
 
 # Then enable the TestSMSEvery10Min EventBridge rule in the AWS Console
-# to receive escalating SMS messages every 10 minutes instead of daily.
+# to receive escalating reminders every 10 minutes instead of daily.
 # Disable it again when done, unless you enjoy consequences.
 ```
 
@@ -128,7 +144,18 @@ Test records use a `TEST#` DynamoDB key prefix and never interfere with the live
 
 ## Cost
 
-Running this 24/7 in `eu-west-2` costs approximately **nothing**. A few pence per month at most — the DynamoDB table uses on-demand billing, the Lambdas run for milliseconds a day, and SES/SNS charges fractions of a penny per message.
+Running this in `eu-west-2` costs approximately **nothing**. The breakdown for the genuinely curious:
+
+| Service | Usage | Cost |
+|---------|-------|------|
+| Lambda | ~10 invocations/week | Free tier |
+| DynamoDB | 1 record/week, on-demand | Free tier |
+| SES | ~5 emails/week | Free tier (62,000/month included) |
+| CloudFront | ~5 requests/week | Free tier (10M/month included) |
+| Secrets Manager | 1 secret | ~$0.40/month |
+| EventBridge | 5 rules | Free |
+
+Total: **~40p/month**, entirely dominated by Secrets Manager.
 
 The cost of *not* building this — in terms of filter-related appliance damage — is left as an exercise for the reader.
 
