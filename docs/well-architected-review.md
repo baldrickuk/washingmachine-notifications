@@ -16,20 +16,20 @@ xychart-beta
     title "Well-Architected Pillar Scores (out of 5)"
     x-axis ["Operational Excellence", "Security", "Reliability", "Performance Efficiency", "Cost Optimization", "Sustainability"]
     y-axis "Score" 0 --> 5
-    bar [3, 5, 3, 4, 5, 3]
+    bar [4, 5, 4, 4, 5, 3]
 ```
 
 | Pillar | Score | HRI | MRI | Status |
 |--------|:-----:|:---:|:---:|--------|
-| Operational Excellence | 3/5 | 2 | 3 | ⚠️ Gaps in observability and automation |
+| Operational Excellence | 4/5 | 0 | 2 | ✅ Alarms and DLQ in place |
 | Security | 5/5 | 0 | 1 | ✅ Excellent — threat model fully maintained |
-| Reliability | 3/5 | 2 | 1 | ⚠️ Silent failure risk on event-driven paths |
+| Reliability | 4/5 | 0 | 1 | ✅ DLQ and failure alerting resolved |
 | Performance Efficiency | 4/5 | 0 | 2 | ✅ Well-optimised — minor tuning opportunities |
 | Cost Optimization | 5/5 | 0 | 0 | ✅ Effectively free |
 | Sustainability | 3/5 | 0 | 1 | ⚠️ ARM/Graviton not used |
-| **Overall** | **3.8/5** | **4** | **8** | |
+| **Overall** | **4.2/5** | **0** | **7** | |
 
-**Key message:** The security and cost posture are exemplary for a workload of this type. The primary gaps are operational — no alerting means a Lambda failure on Sunday morning would go undetected until someone notices they haven't received an email. Addressing the two High Risk Issues would materially improve reliability confidence.
+**Key message:** All four High Risk Issues have been resolved. CloudWatch alarms now fire on any Lambda error, and a dead letter queue catches events that fail after retries. The remaining gaps are medium priority — structured logging, automated tests, and switching to ARM Graviton2 are the next logical steps.
 
 ---
 
@@ -40,7 +40,7 @@ Before applying best practices, it is worth acknowledging what this workload is 
 | Factor | Assessment |
 |--------|-----------|
 | Criticality | Low — a missed reminder means a dirty filter, not a business outage |
-| Users | 1 (Sue) |
+| Users | 1 (the recipient) |
 | Revenue dependency | None |
 | Data sensitivity | Low-medium — PII (email/phone) protected in Secrets Manager |
 | Recovery time objective | Hours to days (acceptable) |
@@ -78,8 +78,8 @@ flowchart LR
 
 | # | Finding | Risk | Recommendation |
 |---|---------|:----:|----------------|
-| OE-1 | **No CloudWatch alarms** — Lambda errors, throttles, and duration spikes produce no alerts | 🔴 High | Add CloudWatch metric alarms for `Errors` and `Throttles` on all three Lambda functions. Route to an SNS email topic. ~5 minutes to configure. |
-| OE-2 | **No dead letter queue (DLQ)** — EventBridge invokes Lambdas asynchronously. After 2 retries, failed events are silently discarded | 🔴 High | Add an SQS DLQ to each Lambda's event source mapping. Configure a CloudWatch alarm on `ApproximateNumberOfMessagesVisible` > 0. |
+| OE-1 | **No CloudWatch alarms** — Lambda errors, throttles, and duration spikes produce no alerts | ✅ ~~High~~ | Resolved — CloudWatch alarms on `Errors` for all three functions, DLQ depth, and API Gateway 4xx. All route to SNS → email. |
+| OE-2 | **No dead letter queue (DLQ)** — EventBridge invokes Lambdas asynchronously. After 2 retries, failed events are silently discarded | ✅ ~~High~~ | Resolved — SQS DLQ attached to `SendWeeklyEmail` and `SendDailySMS`. CloudWatch alarm fires on any message in the queue. |
 | OE-3 | **Unstructured logging** — Lambda handlers use `print()` producing plain text. Log querying in CloudWatch Insights is difficult | 🟡 Medium | Replace `print()` with Python's `logging` module using a JSON formatter. Enables structured queries like `filter @message.status = "CONFIRMED"`. |
 | OE-4 | **No automated tests** — no unit or integration tests exist | 🟡 Medium | Add `pytest` unit tests for the core logic (`_escalating_sms`, `_sms_commentary`, `_week_pk`, etc.). Mock boto3 clients. Target >80% coverage. |
 | OE-5 | **No CI/CD pipeline** — deployment is a manual `sam deploy` | 🟡 Medium | Add a GitHub Actions workflow: lint → test → `sam build` → `sam deploy` on push to `main`. |
@@ -144,13 +144,13 @@ sequenceDiagram
     Note over L: Retry 2 of 2
     L->>L: Error again
     L--xDLQ: Event discarded silently
-    Note over DLQ,CW: Nobody knows.\nSue never gets her email.\nThe filter remains unclean.
+    Note over DLQ,CW: Nobody knows.\nThe reminder was never sent.\nThe filter remains unclean.
 ```
 
 | # | Finding | Risk | Recommendation |
 |---|---------|:----:|----------------|
-| REL-1 | **No dead letter queue** — async Lambda failures are silently discarded after 2 retries | 🔴 High | Add SQS DLQ to `SendWeeklyEmailFunction` and `SendDailySMSFunction`. Alert on non-empty queue. |
-| REL-2 | **No failure alerting** — Lambda errors produce no notification | 🔴 High | CloudWatch alarm on `AWS/Lambda Errors` metric for all functions, threshold 1, period 300s. |
+| REL-1 | **No dead letter queue** — async Lambda failures are silently discarded after 2 retries | ✅ ~~High~~ | Resolved — SQS DLQ attached to both scheduled functions. Messages retained for 14 days. |
+| REL-2 | **No failure alerting** — Lambda errors produce no notification | ✅ ~~High~~ | Resolved — CloudWatch alarms on Lambda `Errors` metric, DLQ depth, and API Gateway 4xx throttling. All alert via SNS to `AlertEmail`. |
 | REL-3 | **No post-deploy verification** — no automated check that Sunday's email was actually sent | 🟡 Medium | Add a Monday morning EventBridge rule that checks DynamoDB for a `WEEK#<last-sunday>` record with `email_sent_at` populated. Alert if missing. |
 | REL-4 | **Single region** — `eu-west-2` only | 🟢 Low | Accepted for this risk profile. Recovery is a `sam deploy` to another region. |
 
@@ -327,22 +327,26 @@ flowchart LR
     end
 
     subgraph improve ["⭐⭐⭐  Improve"]
-        O["Operational Excellence\n3/5\n2 HRI open"]
-        R["Reliability\n3/5\n2 HRI open"]
         Su["Sustainability\n3/5\nARM switch pending"]
+    end
+
+    subgraph good2 ["⭐⭐⭐⭐  Good"]
+        O["Operational Excellence\n4/5\nAlarms and DLQ resolved"]
+        R["Reliability\n4/5\nDLQ and alerting resolved"]
     end
 
     style excellent fill:#0d2137,stroke:#1e7a1e
     style good fill:#0d2137,stroke:#7a7a1e
+    style good2 fill:#0d2137,stroke:#7a7a1e
     style improve fill:#0d2137,stroke:#7a3a1e
 ```
 
 | Total findings | 13 |
 |---|---|
-| 🔴 High Risk Issues | 4 |
-| 🟡 Medium Risk Issues | 8 |
+| 🔴 High Risk Issues | 0 (4 resolved) |
+| 🟡 Medium Risk Issues | 7 |
 | 🟢 Low Risk Issues | 5 (excluding accepted risks) |
-| ✅ Already resolved | 4 |
+| ✅ Resolved | 8 |
 | Accepted (out of scope for risk profile) | 2 (single region, VPC) |
 
 ---

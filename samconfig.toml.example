@@ -17,6 +17,7 @@ parameter_overrides = [
   "WifePhone=+447700000000",
   "FromEmail=reminders@yourdomain.com",
   "AnimalType=bunny",
+  "AlertEmail=ops@yourdomain.com",
   "TwilioAccountSid=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "TwilioAuthToken=your_auth_token_here",
   "TwilioFromNumber=+447700000000"

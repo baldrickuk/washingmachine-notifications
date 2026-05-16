@@ -55,6 +55,9 @@ Parameters:
     Type: String
     Default: filter_confirmed
     Description: Approved Meta template name for the congratulations message
+  AlertEmail:
+    Type: String
+    Description: Email address to receive operational alerts (Lambda errors, DLQ depth, throttling)
 
 Globals:
   Function:
@@ -120,6 +123,23 @@ Resources:
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource: !Ref AppSecrets
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt LambdaDLQ.Arn
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-alerts"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  LambdaDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-dlq"
+      MessageRetentionPeriod: 1209600  # 14 days
 
   AppSecrets:
     Type: AWS::SecretsManager::Secret
@@ -174,6 +194,9 @@ Resources:
       CodeUri: src/handlers/
       Handler: app.send_weekly_email
       Role: !GetAtt LambdaRole.Arn
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt LambdaDLQ.Arn
       Environment:
         Variables:
           API_BASE_URL: !Sub "https://${ConfirmCloudFront.DomainName}"
@@ -198,6 +221,9 @@ Resources:
       CodeUri: src/handlers/
       Handler: app.send_daily_sms
       Role: !GetAtt LambdaRole.Arn
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt LambdaDLQ.Arn
       Events:
         DailySMSBST:
           Type: Schedule
@@ -236,6 +262,103 @@ Resources:
             ApiId: !Ref ConfirmApi
             Path: /confirm
             Method: GET
+
+  # --- CloudWatch Alarms ---
+
+  WeeklyEmailErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-weekly-email-errors"
+      AlarmDescription: SendWeeklyEmail Lambda has errors — the Sunday reminder may not have been sent
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SendWeeklyEmailFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  DailySMSErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-daily-sms-errors"
+      AlarmDescription: SendDailySMS Lambda has errors — a daily reminder may not have been sent
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SendDailySMSFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  ConfirmTaskErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-confirm-task-errors"
+      AlarmDescription: ConfirmTask Lambda has errors — a confirmation attempt may have failed
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ConfirmTaskFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  DLQDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-dlq-depth"
+      AlarmDescription: Lambda DLQ is non-empty — a function failed after all retries
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt LambdaDLQ.QueueName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  ApiGatewayThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-api-throttling"
+      AlarmDescription: API Gateway is returning 4xx responses — rate limit may be hit (CloudFront throttling)
+      Namespace: AWS/ApiGateway
+      MetricName: 4xx
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref ConfirmApi
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
 
 Outputs:
   ConfirmUrl:
