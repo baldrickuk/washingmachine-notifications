@@ -4,9 +4,10 @@
 > *— Me, after spending a weekend building a serverless AWS reminder system*
 
 ![Python](https://img.shields.io/badge/Python-3.12-3776ab?style=flat-square&logo=python&logoColor=white)
-![AWS SAM](https://img.shields.io/badge/AWS-SAM-FF9900?style=flat-square&logo=amazonaws&logoColor=white)
+![OpenTofu](https://img.shields.io/badge/OpenTofu-1.7-FFDA18?style=flat-square&logo=opentofu&logoColor=black)
 ![Pylint](https://img.shields.io/badge/Pylint-10.00%2F10-4c1?style=flat-square)
-![Threat Model](https://img.shields.io/badge/Threat%20Model-v1.3-blue?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-42%20passing-4c1?style=flat-square)
+![Well Architected](https://img.shields.io/badge/Well--Architected-4.8%2F5-0078d4?style=flat-square)
 ![Filter Status](https://img.shields.io/badge/Filter-Clean-brightgreen?style=flat-square)
 
 A production-grade, enterprise-ready, cloud-native, infinitely-scalable solution to the age-old problem of getting someone to clean the washing machine filter.
@@ -32,6 +33,7 @@ Rather than have a single, normal conversation like a well-adjusted adult, I bui
 - **A congratulations email** featuring a random animal photo upon confirmation
 - **AWS Secrets Manager** — because enterprise security practices apply even to laundry
 - **CloudFront with GB-only geo restriction** — because the filter is not going to clean itself from abroad
+- **Terraform / OpenTofu** — because infrastructure should be code, even for domestic chores
 
 The filter is cleaned. The marriage survives. The cloud bill is negligible.
 
@@ -110,12 +112,13 @@ flowchart TD
 
 ## Architecture & Security
 
-The full technical horror is documented across two files:
+The full technical horror is documented across three files:
 
 | Document | Contents |
 |---|---|
-| [`docs/architecture.md`](docs/architecture.md) | System overview, all data flows, DynamoDB model, notification channels, secrets management, test mode |
-| [`docs/threat-model.md`](docs/threat-model.md) | STRIDE analysis, risk matrix, attack trees, findings — 3 of 5 resolved |
+| [`docs/architecture.md`](docs/architecture.md) | System overview, Terraform structure, all data flows, DynamoDB model, notification channels, secrets management, test mode |
+| [`docs/threat-model.md`](docs/threat-model.md) | STRIDE analysis, risk matrix, attack trees — v1.3, all medium findings resolved |
+| [`docs/well-architected-review.md`](docs/well-architected-review.md) | AWS Well-Architected Framework review — 4.8/5 overall, 13 of 13 findings resolved |
 
 **Security posture at a glance:**
 
@@ -128,7 +131,7 @@ The full technical horror is documented across two files:
 | API Gateway rate limiting (5 req/s) | ✅ |
 | CloudFront GB geo restriction | ✅ |
 | HTTPS everywhere | ✅ |
-| DynamoDB CloudTrail data events | ⚠️ |
+| DynamoDB CloudTrail data events | ✅ |
 
 ---
 
@@ -137,7 +140,8 @@ The full technical horror is documented across two files:
 ### Prerequisites
 
 - An AWS account with the CLI configured
-- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) installed
+- [OpenTofu](https://opentofu.org/docs/intro/install/) (`tofu`) or [Terraform](https://developer.hashicorp.com/terraform/install)
+- Python 3 and pip
 - A verified SES sender email address
 
 ### Deploy
@@ -146,10 +150,15 @@ The full technical horror is documented across two files:
 git clone https://github.com/baldrickuk/washingmachine-notifications.git
 cd washingmachine-notifications
 
-cp samconfig.toml.example samconfig.toml
-# Edit samconfig.toml — set WifeEmail, WifePhone, FromEmail
+# Copy and fill in your values
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+# Edit terraform/terraform.tfvars — set wife_email, wife_phone, from_email, alert_email
 
-sam build && sam deploy
+# Build the Lambda package
+bash terraform/build.sh
+
+# Deploy
+cd terraform && tofu init && tofu apply
 ```
 
 That's it. The system will now operate autonomously every Sunday until the filter is clean, the account is deleted, or civilisation collapses.
@@ -166,10 +175,10 @@ That's it. The system will now operate autonomously every Sunday until the filte
 
 ### Optional channels
 
-| Channel | How to enable |
+| Channel | Variables to set in `terraform.tfvars` |
 |---|---|
-| **Twilio SMS** | Set `TwilioEnabled=true`, fill in `TwilioAccountSid`, `TwilioAuthToken`, `TwilioFromNumber` in `samconfig.toml` |
-| **WhatsApp** | Set `WhatsAppPhoneNumberId` + `WhatsAppAccessToken`. Requires Meta WhatsApp Business account and three pre-approved message templates. See `docs/architecture.md`. |
+| **Twilio SMS** | `twilio_enabled = "true"`, `twilio_account_sid`, `twilio_auth_token`, `twilio_from_number` |
+| **WhatsApp** | `whatsapp_phone_number_id`, `whatsapp_access_token` — requires Meta WhatsApp Business account and three pre-approved message templates |
 
 Credentials are stored in **AWS Secrets Manager** automatically on deploy — never in Lambda environment variables.
 
@@ -178,23 +187,36 @@ Credentials are stored in **AWS Secrets Manager** automatically on deploy — ne
 ## Testing
 
 ```bash
-# Resolve the deployed function name
-FUNC=$(aws lambda list-functions --profile dev --region eu-west-2 \
-  --query 'Functions[?contains(FunctionName,`SendWeeklyEmail`)].FunctionName' \
-  --output text)
-
 # Fire the test email immediately (bypasses Sunday time check)
 echo '{"test": true}' > /tmp/payload.json
 aws lambda invoke \
-  --function-name $FUNC \
+  --function-name washingmachine-notifications-send-weekly-email \
   --payload file:///tmp/payload.json \
-  --profile dev --region eu-west-2 \
+  --region eu-west-2 \
   --cli-binary-format raw-in-base64-out /dev/stdout
 ```
 
 Test records use a `TEST#` DynamoDB key prefix and never interfere with the live weekly cycle. Re-running the test email resets the escalation counter.
 
-To test escalating reminders every 10 minutes, enable the `TestSMSEvery10Min` EventBridge rule in the AWS Console. Disable it when done, unless you enjoy consequences.
+To test escalating reminders every 10 minutes:
+```bash
+# Enable
+aws events enable-rule --name washingmachine-notifications-test-sms --region eu-west-2
+
+# Disable when done, unless you enjoy consequences
+aws events disable-rule --name washingmachine-notifications-test-sms --region eu-west-2
+```
+
+---
+
+## Running the tests
+
+```bash
+pip install -r tests/requirements.txt
+python -m pytest tests/ -v
+```
+
+42 unit tests, 0.06s. No real AWS calls — fully mocked.
 
 ---
 
@@ -206,8 +228,9 @@ To test escalating reminders every 10 minutes, enable the `TestSMSEvery10Min` Ev
 | DynamoDB | 1 record/week, on-demand | Free tier |
 | SES | ~5 emails/week | Free tier |
 | CloudFront | ~5 requests/week | Free tier |
+| EventBridge | 7 rules | Free |
+| CloudTrail | ~40 DynamoDB events/week | Free tier |
 | Secrets Manager | 1 secret | ~$0.40 |
-| EventBridge | 5 rules | Free |
 | **Total** | | **~$0.40/month** |
 
 The cost of *not* building this — in terms of filter-related appliance damage — is left as an exercise for the reader.
