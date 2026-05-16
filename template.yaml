@@ -134,6 +134,33 @@ Resources:
           "whatsapp_access_token": "${WhatsAppAccessToken}"
         }
 
+  ConfirmCloudFront:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${AWS::StackName} — GB-only confirmation endpoint"
+        PriceClass: PriceClass_100
+        DefaultCacheBehavior:
+          TargetOriginId: ApiGatewayOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          # CachingDisabled — confirmation links must always hit the origin
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # AllViewerExceptHostHeader — forwards query strings, skips Host so API GW gets its own hostname
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        Origins:
+          - Id: ApiGatewayOrigin
+            DomainName: !Sub "${ConfirmApi}.execute-api.${AWS::Region}.amazonaws.com"
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: whitelist
+            Locations:
+              - GB
+
   ConfirmApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -149,7 +176,7 @@ Resources:
       Role: !GetAtt LambdaRole.Arn
       Environment:
         Variables:
-          API_BASE_URL: !Sub "https://${ConfirmApi}.execute-api.${AWS::Region}.amazonaws.com"
+          API_BASE_URL: !Sub "https://${ConfirmCloudFront.DomainName}"
       Events:
         # Two schedules to handle GMT/BST — Lambda checks actual UK time and skips if wrong hour
         SundayEmailBST:
@@ -211,8 +238,11 @@ Resources:
             Method: GET
 
 Outputs:
+  ConfirmUrl:
+    Description: Public confirmation endpoint (CloudFront — GB only)
+    Value: !Sub "https://${ConfirmCloudFront.DomainName}"
   ConfirmApiUrl:
-    Description: API Gateway base URL
+    Description: API Gateway origin URL (direct — no geo restriction)
     Value: !Sub "https://${ConfirmApi}.execute-api.${AWS::Region}.amazonaws.com"
   RemindersTableName:
     Description: DynamoDB table name
