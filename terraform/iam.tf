@@ -42,10 +42,16 @@ data "aws_iam_policy_document" "lambda_permissions" {
   }
 
   statement {
-    sid       = "SecretsManager"
-    effect    = "Allow"
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.app.arn]
+    sid    = "SSMParameters"
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter",
+      "kms:Decrypt",
+    ]
+    resources = [
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.stack_name}/*",
+      "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*",
+    ]
   }
 
   statement {
