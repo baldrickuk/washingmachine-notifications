@@ -16,7 +16,7 @@
 flowchart LR
     subgraph t5 ["★★★★★  5 / 5"]
         SEC["🔒 Security\n─────────────\nAll findings resolved\nCloudTrail DDB audit active"]
-        COST["💰 Cost Optimization\n─────────────\nEffectively free\n~$0.40/month"]
+        COST["💰 Cost Optimization\n─────────────\nEffectively free\n~$0.00/month"]
         OPS["⚙️ Operational Excellence\n─────────────\nStructured logs, 42 tests\nCI/CD pipeline live"]
         REL["🔄 Reliability\n─────────────\nDLQ, alarms, and\nMonday verify check"]
         PERF["⚡ Performance Efficiency\n─────────────\nGraviton2, 256MB memory\nAll findings resolved"]
