@@ -118,7 +118,7 @@ The full technical horror is documented across three files:
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | System overview, Terraform structure, all data flows, DynamoDB model, notification channels, secrets management, test mode |
 | [`docs/threat-model.md`](docs/threat-model.md) | STRIDE analysis, risk matrix, attack trees — v1.3, all medium findings resolved |
-| [`docs/well-architected-review.md`](docs/well-architected-review.md) | AWS Well-Architected Framework review — 4.8/5 overall, 13 of 13 findings resolved |
+| [`docs/well-architected-review.md`](docs/well-architected-review.md) | AWS Well-Architected Framework review — 5/5 overall, all findings resolved |
 
 **Security posture at a glance:**
 
