@@ -18,6 +18,10 @@ twilio_account_sid = "unused"
 twilio_auth_token  = "unused"
 twilio_from_number = "unused"
 
+# Twilio WhatsApp (optional — requires twilio_enabled = "true" and a WhatsApp-enabled number)
+twilio_whatsapp_enabled = "false"
+twilio_whatsapp_from    = ""  # e.g. whatsapp:+14155238886
+
 # WhatsApp via Meta Cloud API (optional — leave blank to disable)
 whatsapp_phone_number_id     = ""
 whatsapp_access_token        = ""

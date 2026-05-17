@@ -49,6 +49,8 @@ _TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
 _TWILIO_TOKEN = _PARAMS.get("twilio_auth_token") or os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
 TWILIO_ENABLED = os.environ.get("TWILIO_ENABLED", "false").lower() == "true"
+TWILIO_WHATSAPP_ENABLED = os.environ.get("TWILIO_WHATSAPP_ENABLED", "false").lower() == "true"
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")
 
 if TWILIO_ENABLED:
     from twilio.rest import Client as TwilioClient  # pylint: disable=import-error
@@ -93,6 +95,11 @@ def _notify_initial(confirm_url: str, is_test: bool):
             f"{prefix}It's time to clean the washing machine filter! "
             f"Tap here to confirm once done: {confirm_url}",
         ])
+    elif TWILIO_WHATSAPP_ENABLED:
+        _send_whatsapp_twilio(
+            f"It's time to clean the washing machine filter! Confirm here: {confirm_url}",
+            is_test,
+        )
     else:
         _send_email(confirm_url, is_test)
         _send_nudge_sms(is_test)
@@ -102,6 +109,8 @@ def _notify_reminder(sms_count: int, sunday: date):
     """Send an escalating reminder via the configured channel."""
     if WHATSAPP_ENABLED:
         _send_whatsapp(WHATSAPP_ESCALATION_TEMPLATE, [_escalating_sms(sms_count, sunday)])
+    elif TWILIO_WHATSAPP_ENABLED:
+        _send_whatsapp_twilio(_escalating_sms(sms_count, sunday))
     else:
         _send_sms(_escalating_sms(sms_count, sunday))
 
@@ -117,6 +126,14 @@ def _notify_congratulations(sms_count: int, animal: str):
             else f"🎉 {_sms_commentary(sms_count)}"
         )
         _send_whatsapp(WHATSAPP_CONGRATS_TEMPLATE, [body])
+    elif TWILIO_WHATSAPP_ENABLED:
+        image_url = _fetch_animal_image(animal)
+        body = (
+            f"🎉 {_sms_commentary(sms_count)}\n\nAs your reward: {image_url}"
+            if image_url
+            else f"🎉 {_sms_commentary(sms_count)}"
+        )
+        _send_whatsapp_twilio(body)
     else:
         _send_congratulations_email(sms_count, animal)
 
@@ -164,6 +181,16 @@ def _send_sms(body: str):
         return
     _TWILIO_CLIENT.messages.create(to=WIFE_PHONE, from_=TWILIO_FROM_NUMBER, body=body)
     _log("SMS sent", provider="Twilio")
+
+
+def _send_whatsapp_twilio(message: str, is_test: bool = False):
+    if not _TWILIO_CLIENT or not TWILIO_WHATSAPP_FROM or not WIFE_PHONE:
+        _log("Twilio WhatsApp skipped", reason="not configured")
+        return
+    prefix = "[TEST] " if is_test else ""
+    to = f"whatsapp:{WIFE_PHONE}"
+    _TWILIO_CLIENT.messages.create(body=f"{prefix}{message}", from_=TWILIO_WHATSAPP_FROM, to=to)
+    _log("Twilio WhatsApp sent", to=to, test=is_test)
 
 
 def _now_london() -> datetime:

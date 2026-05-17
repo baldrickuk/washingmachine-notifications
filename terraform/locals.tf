@@ -9,6 +9,8 @@ locals {
     TWILIO_ACCOUNT_SID           = var.twilio_account_sid
     TWILIO_FROM_NUMBER           = var.twilio_from_number
     TWILIO_ENABLED               = var.twilio_enabled
+    TWILIO_WHATSAPP_ENABLED      = var.twilio_whatsapp_enabled
+    TWILIO_WHATSAPP_FROM         = var.twilio_whatsapp_from
     WHATSAPP_PHONE_NUMBER_ID     = var.whatsapp_phone_number_id
     WHATSAPP_REMINDER_TEMPLATE   = var.whatsapp_reminder_template
     WHATSAPP_ESCALATION_TEMPLATE = var.whatsapp_escalation_template

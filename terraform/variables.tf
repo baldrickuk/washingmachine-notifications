@@ -63,6 +63,18 @@ variable "twilio_from_number" {
   default     = "unused"
 }
 
+variable "twilio_whatsapp_enabled" {
+  description = "Set to 'true' to send WhatsApp messages via Twilio (reuses Twilio credentials)"
+  type        = string
+  default     = "false"
+}
+
+variable "twilio_whatsapp_from" {
+  description = "Twilio WhatsApp-enabled sender number, e.g. whatsapp:+14155238886"
+  type        = string
+  default     = ""
+}
+
 variable "whatsapp_phone_number_id" {
   description = "Meta WhatsApp Business phone number ID (optional)"
   type        = string
