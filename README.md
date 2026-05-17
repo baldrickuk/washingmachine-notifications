@@ -178,9 +178,10 @@ That's it. The system will now operate autonomously every Sunday until the filte
 | Channel | Variables to set in `terraform.tfvars` |
 |---|---|
 | **Twilio SMS** | `twilio_enabled = "true"`, `twilio_account_sid`, `twilio_auth_token`, `twilio_from_number` |
-| **WhatsApp** | `whatsapp_phone_number_id`, `whatsapp_access_token` — requires Meta WhatsApp Business account and three pre-approved message templates |
+| **Twilio WhatsApp** | All of the above + `twilio_whatsapp_enabled = "true"`, `twilio_whatsapp_from = "whatsapp:+<number>"` — reuses Twilio credentials, no Meta account needed |
+| **WhatsApp via Meta** | `whatsapp_phone_number_id`, `whatsapp_access_token` — requires Meta WhatsApp Business account and three pre-approved message templates |
 
-Credentials are stored in **AWS Secrets Manager** automatically on deploy — never in Lambda environment variables.
+Credentials are stored in **AWS SSM Parameter Store** automatically on deploy — never in Lambda environment variables.
 
 ---
 

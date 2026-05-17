@@ -45,6 +45,7 @@ graph LR
     subgraph channel ["  Notification Channel  "]
         SES["SES\nEmail\n(always)"]
         TW["Twilio\nSMS\n(optional)"]
+        TWA["Twilio\nWhatsApp\n(optional)"]
         WA["Meta Cloud API\nWhatsApp\n(optional)"]
     end
 
@@ -125,7 +126,7 @@ graph LR
 
 ## Notification Channels
 
-The system supports three delivery channels, selected by configuration. Email is always available; SMS and WhatsApp are opt-in.
+The system supports four delivery channels, selected by configuration in priority order. Email is always available; the others are opt-in.
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
@@ -133,23 +134,26 @@ The system supports three delivery channels, selected by configuration. Email is
 flowchart LR
     DISPATCH["_notify_initial()\n_notify_reminder()\n_notify_congratulations()"]
 
-    DISPATCH -->|"WHATSAPP_PHONE_NUMBER_ID set"| WA["WhatsApp\nvia Meta Cloud API\n(replaces email + SMS)"]
+    DISPATCH -->|"WHATSAPP_PHONE_NUMBER_ID set\n(highest priority)"| WA["WhatsApp\nvia Meta Cloud API"]
+    DISPATCH -->|"TWILIO_WHATSAPP_ENABLED=true"| TWA["WhatsApp\nvia Twilio"]
     DISPATCH -->|"default"| EMAIL["SES Email\n+ optional SMS nudge"]
 
     EMAIL -->|"TWILIO_ENABLED=true"| TSMS["Twilio SMS"]
     EMAIL -->|"TWILIO_ENABLED=false"| NOSMS["SMS skipped"]
 
     style WA fill:#1a2a3a,stroke:#3a6a9a,color:#80b0d0
+    style TWA fill:#1a2a3a,stroke:#3a6a9a,color:#80b0d0
     style EMAIL fill:#1a3a1a,stroke:#3a7a3a,color:#80d080
     style TSMS fill:#2a1a3a,stroke:#6a3a8a,color:#b070d0
     style NOSMS fill:#2a2a2a,stroke:#555,color:#888
 ```
 
-| `WHATSAPP_*` set | `TWILIO_ENABLED` | Channel used |
-|:---:|:---:|---|
-| No | false | Email only (default) |
-| No | true | Email + Twilio SMS |
-| Yes | — | WhatsApp only (no email) |
+| `WHATSAPP_*` set | `TWILIO_WHATSAPP_ENABLED` | `TWILIO_ENABLED` | Channel used |
+|:---:|:---:|:---:|---|
+| No | false | false | Email only (default) |
+| No | false | true | Email + Twilio SMS |
+| No | true | true | WhatsApp via Twilio |
+| Yes | — | — | WhatsApp via Meta Cloud API (no email) |
 
 ---
 
@@ -577,4 +581,5 @@ tofu apply
 | Channel | `terraform.tfvars` variables to set |
 |---|---|
 | Twilio SMS | `twilio_enabled = "true"`, `twilio_account_sid`, `twilio_auth_token`, `twilio_from_number` |
-| WhatsApp | `whatsapp_phone_number_id`, `whatsapp_access_token`, create three approved Meta message templates |
+| Twilio WhatsApp | All of the above + `twilio_whatsapp_enabled = "true"`, `twilio_whatsapp_from = "whatsapp:+<number>"` — enable WhatsApp on the Twilio number first |
+| WhatsApp via Meta | `whatsapp_phone_number_id`, `whatsapp_access_token`, create three approved Meta message templates |
