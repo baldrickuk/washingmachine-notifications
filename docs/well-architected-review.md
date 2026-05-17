@@ -77,19 +77,17 @@ Some Well-Architected best practices (multi-region, cross-AZ replication, chaos 
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117', 'clusterBkg': '#0d2137', 'clusterBorder': '#30363d'}}}%%
 
 flowchart LR
-    subgraph good ["✅ In place"]
-        A["Infrastructure as Code\n(SAM/CloudFormation)"]
+    subgraph good ["✅ All findings resolved"]
+        A["Infrastructure as Code\n(Terraform/OpenTofu)"]
         B["Test mode\n(safe pre-prod testing)"]
         C["Code quality\n(Pylint 10/10)"]
         D["Documentation\n(arch + threat model)"]
         E["Data lifecycle\n(DynamoDB TTL)"]
-    end
-
-    subgraph gaps ["⚠️ Gaps"]
-        F["No CloudWatch\nalarms"]
-        G["No dead letter\nqueue"]
-        H["Unstructured\nlogging"]
-        I["No automated\ntests or CI/CD"]
+        F["CloudWatch alarms\n(errors, DLQ, throttling)"]
+        G["Dead letter queue\n(SQS, 14-day retention)"]
+        H["Structured JSON logging\n(_log function)"]
+        I["Automated tests & CI/CD\n(42 tests, GitHub Actions)"]
+        J["CloudWatch dashboard\n(8-widget operational view)"]
     end
 ```
 
