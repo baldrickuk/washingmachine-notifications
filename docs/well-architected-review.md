@@ -159,7 +159,8 @@ sequenceDiagram
     Note over L: Retry 2 of 2
     L->>L: Error again
     L--xDLQ: Event discarded silently
-    Note over DLQ,CW: Nobody knows.\nThe reminder was never sent.\nThe filter remains unclean.
+    Note over DLQ: Nobody knows
+    Note over CW: Reminder never sent<br/>Filter remains unclean
 ```
 
 | # | Finding | Risk | Recommendation |
