@@ -7,7 +7,7 @@
 ![OpenTofu](https://img.shields.io/badge/OpenTofu-1.7-FFDA18?style=flat-square&logo=opentofu&logoColor=black)
 ![Pylint](https://img.shields.io/badge/Pylint-10.00%2F10-4c1?style=flat-square)
 ![Tests](https://img.shields.io/badge/Tests-42%20passing-4c1?style=flat-square)
-![Well Architected](https://img.shields.io/badge/Well--Architected-4.8%2F5-0078d4?style=flat-square)
+![Well Architected](https://img.shields.io/badge/Well--Architected-5%2F5-0078d4?style=flat-square)
 ![Filter Status](https://img.shields.io/badge/Filter-Clean-brightgreen?style=flat-square)
 
 A production-grade, enterprise-ready, cloud-native, infinitely-scalable solution to the age-old problem of getting someone to clean the washing machine filter.
@@ -31,7 +31,7 @@ Rather than have a single, normal conversation like a well-adjusted adult, I bui
 - **Automated weekly emails** with a confirmation link and an SMS nudge to actually open it
 - **Daily escalating reminders** that grow progressively more unhinged if ignored
 - **A congratulations email** featuring a random animal photo upon confirmation
-- **AWS Secrets Manager** — because enterprise security practices apply even to laundry
+- **AWS Systems Manager Parameter Store** — enterprise-grade secrets management, completely free
 - **CloudFront with GB-only geo restriction** — because the filter is not going to clean itself from abroad
 - **Terraform / OpenTofu** — because infrastructure should be code, even for domestic chores
 
@@ -118,7 +118,7 @@ The full technical horror is documented across three files:
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | System overview, Terraform structure, all data flows, DynamoDB model, notification channels, secrets management, test mode |
 | [`docs/threat-model.md`](docs/threat-model.md) | STRIDE analysis, risk matrix, attack trees — v1.3, all medium findings resolved |
-| [`docs/well-architected-review.md`](docs/well-architected-review.md) | AWS Well-Architected Framework review — 4.8/5 overall, 13 of 13 findings resolved |
+| [`docs/well-architected-review.md`](docs/well-architected-review.md) | AWS Well-Architected Framework review — 5/5 overall, all findings resolved |
 
 **Security posture at a glance:**
 
@@ -126,8 +126,9 @@ The full technical horror is documented across three files:
 |---|:---:|
 | Token authentication (UUID v4, 122-bit entropy) | ✅ |
 | IAM least-privilege | ✅ |
-| Credentials in Secrets Manager (not env vars) | ✅ |
-| PII in Secrets Manager (not env vars) | ✅ |
+| Credentials in SSM Parameter Store SecureString (not env vars) | ✅ |
+| PII in SSM Parameter Store SecureString (not env vars) | ✅ |
+| KMS encryption at rest | ✅ |
 | API Gateway rate limiting (5 req/s) | ✅ |
 | CloudFront GB geo restriction | ✅ |
 | HTTPS everywhere | ✅ |
@@ -181,7 +182,7 @@ That's it. The system will now operate autonomously every Sunday until the filte
 | **Twilio WhatsApp** | All of the above + `twilio_whatsapp_enabled = "true"`, `twilio_whatsapp_from = "whatsapp:+<number>"` — reuses Twilio credentials, no Meta account needed |
 | **WhatsApp via Meta** | `whatsapp_phone_number_id`, `whatsapp_access_token` — requires Meta WhatsApp Business account and three pre-approved message templates |
 
-Credentials are stored in **AWS SSM Parameter Store** automatically on deploy — never in Lambda environment variables.
+Credentials are stored in **AWS Systems Manager Parameter Store (SecureString)** automatically on deploy — never in Lambda environment variables. Encrypted at rest with AWS managed keys, completely within the free tier.
 
 ---
 
@@ -231,8 +232,9 @@ python -m pytest tests/ -v
 | CloudFront | ~5 requests/week | Free tier |
 | EventBridge | 7 rules | Free |
 | CloudTrail | ~40 DynamoDB events/week | Free tier |
-| Secrets Manager | 1 secret | ~$0.40 |
-| **Total** | | **~$0.40/month** |
+| S3 | Audit logs (90-day retention) | Free tier |
+| SSM Parameter Store | 4 SecureString parameters | Free tier |
+| **Total** | | **~$0.00/month** |
 
 The cost of *not* building this — in terms of filter-related appliance damage — is left as an exercise for the reader.
 

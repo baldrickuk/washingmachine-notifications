@@ -14,26 +14,22 @@
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'clusterBkg': '#0d1117', 'clusterBorder': '#30363d'}}}%%
 
 flowchart LR
-    subgraph t5 ["★★★★★  5 / 5"]
+    subgraph t5 ["★★★★★  5 / 5 — All Pillars"]
         SEC["🔒 Security\n─────────────\nAll findings resolved\nCloudTrail DDB audit active"]
-        COST["💰 Cost Optimization\n─────────────\nEffectively free\n~$0.40/month"]
+        COST["💰 Cost Optimization\n─────────────\nEffectively free\n~$0.00/month"]
         OPS["⚙️ Operational Excellence\n─────────────\nStructured logs, 42 tests\nCI/CD pipeline live"]
         REL["🔄 Reliability\n─────────────\nDLQ, alarms, and\nMonday verify check"]
         PERF["⚡ Performance Efficiency\n─────────────\nGraviton2, 256MB memory\nAll findings resolved"]
-    end
-
-    subgraph t4b ["★★★★☆  4 / 5"]
-        SUS["🌱 Sustainability\n─────────────\nGraviton2 active\nResource tagging outstanding"]
+        SUS["🌱 Sustainability\n─────────────\nGraviton2 active\nResource tagging resolved"]
     end
 
     style t5  fill:#0d2a0d,stroke:#2a7a2a,color:#c9d1d9
-    style t4b fill:#0d1a2a,stroke:#2a5a8a,color:#c9d1d9
     style SEC  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
     style COST fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
     style OPS  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
     style REL  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
     style PERF fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
-    style SUS  fill:#1a2a4a,stroke:#3a5a8a,color:#a0c0e0
+    style SUS  fill:#1a4a1a,stroke:#3a8a3a,color:#a0e0a0
 ```
 
 | Pillar | Score | HRI | MRI | Status |
@@ -59,7 +55,7 @@ Before applying best practices, it is worth acknowledging what this workload is 
 | Criticality | Low — a missed reminder means a dirty filter, not a business outage |
 | Users | 1 (the recipient) |
 | Revenue dependency | None |
-| Data sensitivity | Low-medium — PII (email/phone) protected in Secrets Manager |
+| Data sensitivity | Low-medium — PII (email/phone) protected in SSM Parameter Store SecureString (KMS encrypted) |
 | Recovery time objective | Hours to days (acceptable) |
 | Recovery point objective | 1 week (one missed cycle is tolerable) |
 
@@ -263,67 +259,22 @@ pie title Monthly cost breakdown (~$0.00 total)
 
 ---
 
-## Remediation Roadmap
+## Resolutions Summary
 
-Prioritised by risk level and implementation effort.
+All findings have been resolved and implemented as of May 2026. The system achieved a perfect 5/5 score across all six pillars.
 
-```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
+### Resolutions by Category
 
-gantt
-    title Remediation Roadmap
-    dateFormat  YYYY-MM-DD
-    axisFormat  %b %Y
+| Category | Findings | Status | Key Implementations |
+|---|---|---|---|
+| **Operational Excellence** | 6 | ✅ Resolved | CloudWatch alarms, SQS DLQ, structured JSON logging, 42 unit tests, GitHub Actions CI/CD, 8-widget dashboard |
+| **Security** | 6 | ✅ Resolved | Secrets in SSM Parameter Store, API Gateway rate limiting (5 req/s), CloudFront GB geo-restriction, CloudTrail DynamoDB data events, scoped SES IAM |
+| **Reliability** | 4 | ✅ Resolved | SQS DLQ on async functions, CloudWatch alarms, Monday verification check (VerifyDelivery Lambda) |
+| **Performance Efficiency** | 4 | ✅ Resolved | ARM64 Graviton2 architecture, 256MB memory, per-function timeouts, conditional Twilio SDK loading |
+| **Cost Optimization** | 1 | ✅ Resolved | Migrated from Secrets Manager (~$0.40/month) to SSM Parameter Store SecureString (free tier) |
+| **Sustainability** | 2 | ✅ Resolved | ARM64 Graviton2 processors (60% more energy efficient), resource tagging via Terraform default_tags |
 
-    section High Risk (address now)
-    OE-1  CloudWatch alarms for Lambda errors     :crit, 2026-05-17, 1d
-    OE-2  Dead letter queue for EventBridge       :crit, 2026-05-17, 1d
-    REL-1 SQS DLQ on async Lambda functions       :crit, 2026-05-17, 1d
-    REL-2 Failure alerting via SNS email          :crit, 2026-05-18, 1d
-
-    section Medium Risk (next iteration)
-    PERF-1  Switch to ARM Graviton2               :active, 2026-05-24, 1d
-    SUS-1   ARM reduces energy use 60pct          :active, 2026-05-24, 1d
-    OE-3    Structured JSON logging               :2026-05-25, 2d
-    OE-4    Unit tests with pytest                :2026-05-26, 3d
-    OE-5    GitHub Actions CI/CD pipeline         :2026-05-29, 2d
-    REL-3   Monday post-deploy verification       :2026-05-31, 1d
-
-    section Low Risk (backlog)
-    PERF-2  Lambda Power Tuning resolved          :done, 2026-06-07, 2d
-    PERF-3  Remove Twilio from default build      :done, 2026-06-08, 1d
-    PERF-4  Per-function timeout tuning           :done, 2026-06-09, 1d
-    OE-6    CloudWatch dashboard                  :done, 2026-06-10, 1d
-    SEC-6   Narrow SES IAM to identity ARN        :done, 2026-06-12, 1d
-    SUS-2   Resource tagging via default_tags      :done, 2026-06-14, 1d
-```
-
-### Quick wins (under 30 minutes each)
-
-These can all be done in a single `template.yaml` edit and `sam deploy`:
-
-```yaml
-# 1. Switch to ARM Graviton2 (PERF-1, SUS-1)
-Globals:
-  Function:
-    Architectures: [arm64]
-
-# 2. Per-function timeouts (PERF-4)
-SendWeeklyEmailFunction:
-  Timeout: 30
-SendDailySMSFunction:
-  Timeout: 15
-ConfirmTaskFunction:
-  Timeout: 10
-
-# 3. Resource tags (SUS-2)
-Globals:
-  Function:
-    Tags:
-      Project: washingmachine-notifications
-      Environment: production
-      Owner: guy@dunite.uk
-```
+**Total: 18 findings addressed, zero open items, all pillars 5/5.**
 
 ---
 
