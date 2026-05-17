@@ -35,6 +35,8 @@ resource "aws_ssm_parameter" "twilio_auth_token" {
 }
 
 resource "aws_ssm_parameter" "whatsapp_access_token" {
+  count = var.whatsapp_access_token != "" ? 1 : 0
+
   name  = "/${var.stack_name}/whatsapp_access_token"
   type  = "SecureString"
   value = var.whatsapp_access_token

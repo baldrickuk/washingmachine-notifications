@@ -482,7 +482,13 @@ def _fetch_animal_image(animal: str) -> str:
             ) as r:
                 return json.loads(r.read())["image"]
 
-        search_term = "rabbit" if animal == "bunny" else animal
+        if animal == "bunny":
+            with urllib.request.urlopen(
+                "https://api.bunnies.io/v2/loop/random/?media=gif,png", timeout=5
+            ) as r:
+                return json.loads(r.read())["media"]["poster"]
+
+        search_term = animal
         req = urllib.request.Request(
             f"https://loremflickr.com/640/480/{search_term}/all",
             headers={"User-Agent": "WashingMachineReminder/1.0"},
