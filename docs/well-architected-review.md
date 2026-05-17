@@ -43,8 +43,8 @@ flowchart LR
 | Reliability | 5/5 | 0 | 0 | ✅ All findings resolved |
 | Performance Efficiency | 5/5 | 0 | 0 | ✅ All findings resolved |
 | Cost Optimization | 5/5 | 0 | 0 | ✅ Effectively free |
-| Sustainability | 4/5 | 0 | 0 | ✅ Graviton2 active — resource tagging outstanding |
-| **Overall** | **4.8/5** | **0** | **0** | |
+| Sustainability | 5/5 | 0 | 0 | ✅ All findings resolved |
+| **Overall** | **5/5** | **0** | **0** | |
 
 **Key message:** All findings are resolved. Zero open items. The workload is in excellent shape for its risk profile — which is impressive for a system whose entire purpose is reminding someone to clean a filter.
 
@@ -334,28 +334,16 @@ Globals:
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
 
 flowchart LR
-    subgraph excellent ["⭐⭐⭐⭐⭐  Excellent"]
+    subgraph excellent ["⭐⭐⭐⭐⭐  Perfect Score: All Pillars 5/5"]
         S["Security\n5/5"]
         C["Cost Optimization\n5/5"]
+        O["Operational Excellence\n5/5"]
+        R["Reliability\n5/5"]
+        P["Performance Efficiency\n5/5"]
+        Su["Sustainability\n5/5"]
     end
 
-    subgraph good ["⭐⭐⭐⭐  Good"]
-        P["Performance Efficiency\n4/5"]
-    end
-
-    subgraph improve ["⭐⭐⭐  Improve"]
-        Su["Sustainability\n3/5\nARM switch pending"]
-    end
-
-    subgraph good2 ["⭐⭐⭐⭐  Good"]
-        O["Operational Excellence\n4/5\nAlarms and DLQ resolved"]
-        R["Reliability\n4/5\nDLQ and alerting resolved"]
-    end
-
-    style excellent fill:#0d2137,stroke:#1e7a1e
-    style good fill:#0d2137,stroke:#7a7a1e
-    style good2 fill:#0d2137,stroke:#7a7a1e
-    style improve fill:#0d2137,stroke:#7a3a1e
+    style excellent fill:#0d2a0d,stroke:#2a7a2a,color:#c9d1d9
 ```
 
 | Total findings | 13 |
