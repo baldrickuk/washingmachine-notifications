@@ -43,8 +43,8 @@ flowchart LR
 | Reliability | 5/5 | 0 | 0 | ✅ All findings resolved |
 | Performance Efficiency | 5/5 | 0 | 0 | ✅ All findings resolved |
 | Cost Optimization | 5/5 | 0 | 0 | ✅ Effectively free |
-| Sustainability | 4/5 | 0 | 0 | ✅ Graviton2 active — resource tagging outstanding |
-| **Overall** | **4.8/5** | **0** | **0** | |
+| Sustainability | 5/5 | 0 | 0 | ✅ All findings resolved |
+| **Overall** | **5/5** | **0** | **0** | |
 
 **Key message:** All findings are resolved. Zero open items. The workload is in excellent shape for its risk profile — which is impressive for a system whose entire purpose is reminding someone to clean a filter.
 
@@ -77,19 +77,17 @@ Some Well-Architected best practices (multi-region, cross-AZ replication, chaos 
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117', 'clusterBkg': '#0d2137', 'clusterBorder': '#30363d'}}}%%
 
 flowchart LR
-    subgraph good ["✅ In place"]
-        A["Infrastructure as Code\n(SAM/CloudFormation)"]
+    subgraph good ["✅ All findings resolved"]
+        A["Infrastructure as Code\n(Terraform/OpenTofu)"]
         B["Test mode\n(safe pre-prod testing)"]
         C["Code quality\n(Pylint 10/10)"]
         D["Documentation\n(arch + threat model)"]
         E["Data lifecycle\n(DynamoDB TTL)"]
-    end
-
-    subgraph gaps ["⚠️ Gaps"]
-        F["No CloudWatch\nalarms"]
-        G["No dead letter\nqueue"]
-        H["Unstructured\nlogging"]
-        I["No automated\ntests or CI/CD"]
+        F["CloudWatch alarms\n(errors, DLQ, throttling)"]
+        G["Dead letter queue\n(SQS, 14-day retention)"]
+        H["Structured JSON logging\n(_log function)"]
+        I["Automated tests & CI/CD\n(42 tests, GitHub Actions)"]
+        J["CloudWatch dashboard\n(8-widget operational view)"]
     end
 ```
 
@@ -161,7 +159,8 @@ sequenceDiagram
     Note over L: Retry 2 of 2
     L->>L: Error again
     L--xDLQ: Event discarded silently
-    Note over DLQ,CW: Nobody knows.\nThe reminder was never sent.\nThe filter remains unclean.
+    Note over DLQ: Nobody knows
+    Note over CW: Reminder never sent<br/>Filter remains unclean
 ```
 
 | # | Finding | Risk | Recommendation |
@@ -335,28 +334,16 @@ Globals:
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
 
 flowchart LR
-    subgraph excellent ["⭐⭐⭐⭐⭐  Excellent"]
+    subgraph excellent ["⭐⭐⭐⭐⭐  Perfect Score: All Pillars 5/5"]
         S["Security\n5/5"]
         C["Cost Optimization\n5/5"]
+        O["Operational Excellence\n5/5"]
+        R["Reliability\n5/5"]
+        P["Performance Efficiency\n5/5"]
+        Su["Sustainability\n5/5"]
     end
 
-    subgraph good ["⭐⭐⭐⭐  Good"]
-        P["Performance Efficiency\n4/5"]
-    end
-
-    subgraph improve ["⭐⭐⭐  Improve"]
-        Su["Sustainability\n3/5\nARM switch pending"]
-    end
-
-    subgraph good2 ["⭐⭐⭐⭐  Good"]
-        O["Operational Excellence\n4/5\nAlarms and DLQ resolved"]
-        R["Reliability\n4/5\nDLQ and alerting resolved"]
-    end
-
-    style excellent fill:#0d2137,stroke:#1e7a1e
-    style good fill:#0d2137,stroke:#7a7a1e
-    style good2 fill:#0d2137,stroke:#7a7a1e
-    style improve fill:#0d2137,stroke:#7a3a1e
+    style excellent fill:#0d2a0d,stroke:#2a7a2a,color:#c9d1d9
 ```
 
 | Total findings | 13 |
