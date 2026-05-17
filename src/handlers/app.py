@@ -19,28 +19,34 @@ API_BASE_URL = os.environ.get("API_BASE_URL", "")
 ANIMAL_TYPE = os.environ.get("ANIMAL_TYPE", "bunny")
 ALERT_TOPIC_ARN = os.environ.get("ALERT_TOPIC_ARN", "")
 
-# --- Secrets Manager (fetched once at cold start, cached for Lambda lifetime) ---
-def _load_secrets() -> dict:
-    """Fetch sensitive credentials from Secrets Manager."""
-    arn = os.environ.get("SECRETS_ARN", "")
-    if not arn:
-        return {}
-    try:
-        client = boto3.client("secretsmanager")
-        response = client.get_secret_value(SecretId=arn)
-        return json.loads(response["SecretString"])
-    except (ClientError, json.JSONDecodeError, KeyError) as exc:
-        _log("Failed to load secrets", level="WARNING", error=str(exc))
-        return {}
+# --- SSM Parameter Store (fetched once at cold start, cached for Lambda lifetime) ---
+def _load_parameters() -> dict:
+    """Fetch sensitive credentials from SSM Parameter Store."""
+    client = boto3.client("ssm")
+    params = {}
+    for env_key, param_name in [
+        ("PARAM_TWILIO_AUTH_TOKEN", "twilio_auth_token"),
+        ("PARAM_WHATSAPP_ACCESS_TOKEN", "whatsapp_access_token"),
+        ("PARAM_WIFE_EMAIL", "wife_email"),
+        ("PARAM_WIFE_PHONE", "wife_phone"),
+    ]:
+        param_path = os.environ.get(env_key, "")
+        if param_path:
+            try:
+                response = client.get_parameter(Name=param_path, WithDecryption=True)
+                params[param_name] = response["Parameter"]["Value"]
+            except ClientError as exc:
+                _log(f"Failed to load parameter {param_path}", level="WARNING", error=str(exc))
+    return params
 
-_SECRETS = _load_secrets()
+_PARAMS = _load_parameters()
 
-WIFE_EMAIL = _SECRETS.get("wife_email") or os.environ.get("WIFE_EMAIL", "")
-WIFE_PHONE = _SECRETS.get("wife_phone") or os.environ.get("WIFE_PHONE", "")
+WIFE_EMAIL = _PARAMS.get("wife_email") or os.environ.get("WIFE_EMAIL", "")
+WIFE_PHONE = _PARAMS.get("wife_phone") or os.environ.get("WIFE_PHONE", "")
 
 # --- Twilio (optional SMS provider) ---
 _TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-_TWILIO_TOKEN = _SECRETS.get("twilio_auth_token") or os.environ.get("TWILIO_AUTH_TOKEN", "")
+_TWILIO_TOKEN = _PARAMS.get("twilio_auth_token") or os.environ.get("TWILIO_AUTH_TOKEN", "")
 TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
 TWILIO_ENABLED = os.environ.get("TWILIO_ENABLED", "false").lower() == "true"
 
@@ -53,7 +59,7 @@ else:
 # --- WhatsApp via Meta Cloud API (optional, replaces email + SMS when enabled) ---
 WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
 WHATSAPP_ACCESS_TOKEN = (
-    _SECRETS.get("whatsapp_access_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
+    _PARAMS.get("whatsapp_access_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
 )
 WHATSAPP_REMINDER_TEMPLATE = os.environ.get("WHATSAPP_REMINDER_TEMPLATE", "filter_reminder")
 WHATSAPP_ESCALATION_TEMPLATE = os.environ.get("WHATSAPP_ESCALATION_TEMPLATE", "filter_escalation")

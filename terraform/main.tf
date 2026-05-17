@@ -21,22 +21,47 @@ resource "aws_dynamodb_table" "reminders" {
 }
 
 # ---------------------------------------------------------------------------
-# Secrets Manager
+# SSM Parameter Store (SecureString) — sensitive credentials
 # ---------------------------------------------------------------------------
 
-resource "aws_secretsmanager_secret" "app" {
-  name        = "${var.stack_name}/secrets"
-  description = "Sensitive credentials — Twilio, WhatsApp tokens, and recipient PII"
+resource "aws_ssm_parameter" "twilio_auth_token" {
+  name  = "/${var.stack_name}/twilio_auth_token"
+  type  = "SecureString"
+  value = var.twilio_auth_token
+
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
-resource "aws_secretsmanager_secret_version" "app" {
-  secret_id = aws_secretsmanager_secret.app.id
-  secret_string = jsonencode({
-    twilio_auth_token     = var.twilio_auth_token
-    whatsapp_access_token = var.whatsapp_access_token
-    wife_email            = var.wife_email
-    wife_phone            = var.wife_phone
-  })
+resource "aws_ssm_parameter" "whatsapp_access_token" {
+  name  = "/${var.stack_name}/whatsapp_access_token"
+  type  = "SecureString"
+  value = var.whatsapp_access_token
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "wife_email" {
+  name  = "/${var.stack_name}/wife_email"
+  type  = "SecureString"
+  value = var.wife_email
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "wife_phone" {
+  name  = "/${var.stack_name}/wife_phone"
+  type  = "SecureString"
+  value = var.wife_phone
+
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 # ---------------------------------------------------------------------------

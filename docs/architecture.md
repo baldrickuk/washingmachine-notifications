@@ -26,13 +26,15 @@ graph LR
 
     subgraph store ["  Storage  "]
         DB[("DynamoDB\n─────────────\nPK: WEEK#YYYY-MM-DD\nstatus · token\nsms_dates · ttl")]
-        SM[("Secrets Manager\n─────────────\ntwilio_auth_token\nwife_email · wife_phone")]
+        SSM[("SSM Parameter Store\n─────────────\nSecureString\ntwilio_auth_token\nwife_email · wife_phone")]
     end
 
-    subgraph ops ["  Observability  "]
+    subgraph ops ["  Observability & Audit  "]
         DLQ[("SQS DLQ\n─────────────\n14-day retention")]
         CW["CloudWatch\nAlarms x5"]
         STOPIC["SNS Alert Topic\n─────────────\nAlertEmail"]
+        CT["CloudTrail\nDynamoDB audit"]
+        S3[("S3 Audit Bucket\n─────────────\n90-day retention")]
     end
 
     subgraph edge ["  Edge  "]
@@ -56,8 +58,9 @@ graph LR
     EB3 -.->|fires test| L2
     EB4 -->|fires| L4
 
-    L1 & L2 & L3 & L4 -->|read at cold start| SM
+    L1 & L2 & L3 & L4 -->|read at cold start| SSM
     L4 -->|check record| DB
+    CT -->|stores audit logs| S3
     L4 -.->|"alert if\nmissing"| STOPIC
     L1 -->|create record| DB
     L1 -->|send| SES
@@ -107,15 +110,16 @@ graph LR
 | **EventBridge** | 7 scheduled rules (6 prod + 1 test) | Triggers all four Lambda functions on schedule |
 | **Lambda** × 4 | `SendWeeklyEmail`, `SendDailySMS`, `ConfirmTask`, `VerifyDelivery` | All business logic — arm64 Graviton2, 256 MB |
 | **DynamoDB** | Single table, PAY_PER_REQUEST | Tracks weekly task state (30-day TTL) |
-| **Secrets Manager** | `washingmachine-notifications/secrets` | Stores credentials and recipient PII |
+| **SSM Parameter Store** | 4 SecureString parameters | Stores Twilio/WhatsApp tokens and recipient PII (encrypted at rest with KMS) |
 | **SES** | Email via verified identity | Sends reminder and congratulations emails |
 | **CloudFront** | Distribution, `PriceClass_100`, GB whitelist | GB-only geo restriction at the CDN edge — non-GB requests never reach the origin |
 | **API Gateway** | HTTP API v2, `GET /confirm`, throttled 5 req/s | Confirmation link origin behind CloudFront |
 | **SQS** | Dead letter queue, 14-day retention | Catches Lambda events that fail after all retries |
 | **CloudWatch** | 5 metric alarms | Monitors Lambda errors, DLQ depth, and API Gateway 4xx throttling |
 | **SNS** | Alert topic → `alert_email` | Delivers operational alerts via email |
-| **CloudTrail** | Trail + S3 audit bucket | DynamoDB data event audit log (90-day retention) |
-| **IAM** | Single shared role | Least-privilege access to DDB, SES, Secrets Manager, SQS, SNS |
+| **CloudTrail** | Trail with DynamoDB data events | Audits all reads/writes to the reminders table |
+| **S3** | Audit bucket with 90-day lifecycle | Stores CloudTrail audit logs for compliance and investigation |
+| **IAM** | Single shared role | Least-privilege access to DDB, SES, SSM Parameter Store, SQS, SNS, KMS |
 
 ---
 
@@ -151,7 +155,7 @@ flowchart LR
 
 ## Weekly Reminder Flow
 
-Fires every Sunday at 09:00 UK time. Two EventBridge rules cover GMT and BST — the Lambda checks the actual London hour and exits early if wrong. Credentials are fetched from Secrets Manager on cold start.
+Fires every Sunday at 09:00 UK time. Two EventBridge rules cover GMT and BST — the Lambda checks the actual London hour and exits early if wrong. Credentials are fetched from SSM Parameter Store on cold start and cached for the Lambda lifetime.
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
@@ -159,7 +163,7 @@ Fires every Sunday at 09:00 UK time. Two EventBridge rules cover GMT and BST —
 sequenceDiagram
     actor EB as EventBridge
     participant L  as SendWeeklyEmail λ
-    participant SM as Secrets Manager
+    participant SSM as SSM Parameter Store
     participant DB as DynamoDB
     participant CH as Channel (SES / WhatsApp)
     actor W  as Recipient
@@ -167,9 +171,9 @@ sequenceDiagram
     EB->>L: Sunday 08:00 or 09:00 UTC
     activate L
 
-    Note over L,SM: Cold start only
-    L->>SM: GetSecretValue
-    SM-->>L: {twilio_auth_token, whatsapp_access_token}
+    Note over L,SSM: Cold start only
+    L->>SSM: GetParameter (with KMS decryption)
+    SSM-->>L: {twilio_auth_token, whatsapp_access_token, wife_email, wife_phone}
 
     L->>L: Check actual London time == 09:xx
     Note over L: Exits if wrong hour (DST guard)
@@ -299,30 +303,34 @@ erDiagram
 
 ## Secrets Management
 
-Sensitive credentials are stored in AWS Secrets Manager and fetched once per Lambda cold start, then cached in memory for the instance lifetime.
+Sensitive credentials are stored in AWS Systems Manager Parameter Store (SecureString) and fetched once per Lambda cold start, then cached in memory for the instance lifetime. Uses AWS managed KMS encryption at rest.
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
 
 sequenceDiagram
     participant L  as Lambda (cold start)
-    participant SM as Secrets Manager
+    participant SSM as SSM Parameter Store
+    participant KMS as KMS (encryption)
     participant ENV as Environment Variables
 
-    L->>SM: GetSecretValue(SECRETS_ARN)
-    SM-->>L: {"twilio_auth_token": "...", "whatsapp_access_token": "...", "wife_email": "...", "wife_phone": "..."}
-    Note over L: Cached in module-level _SECRETS dict
+    L->>SSM: GetParameter(/stack-name/twilio_auth_token, WithDecryption=true)
+    SSM->>KMS: Decrypt
+    KMS-->>SSM: Decrypted value
+    SSM-->>L: Decrypted parameter value
+    
+    Note over L: Repeated for wife_email, wife_phone, whatsapp_access_token<br/>All cached in module-level _PARAMS dict
 
     L->>ENV: Read non-sensitive config<br/>(FROM_EMAIL, TABLE_NAME, TWILIO_ACCOUNT_SID…)
-    Note over L,ENV: Falls back to env vars if<br/>Secrets Manager unavailable
+    Note over L,ENV: Falls back to env vars if<br/>Parameter Store unavailable
 ```
 
 | Secret | Location | Visible in Lambda config? |
 |---|---|:---:|
-| `twilio_auth_token` | Secrets Manager | No |
-| `whatsapp_access_token` | Secrets Manager | No |
-| `wife_email` | Secrets Manager | No |
-| `wife_phone` | Secrets Manager | No |
+| `twilio_auth_token` | SSM Parameter Store (SecureString) | No |
+| `whatsapp_access_token` | SSM Parameter Store (SecureString) | No |
+| `wife_email` | SSM Parameter Store (SecureString) | No |
+| `wife_phone` | SSM Parameter Store (SecureString) | No |
 | `FROM_EMAIL` | Environment variable | Yes (sender address — not PII) |
 | `TWILIO_ACCOUNT_SID` | Environment variable | Yes (identifier, not credential) |
 
@@ -512,13 +520,13 @@ flowchart LR
         P["providers.tf\nAWS 5.x + null"]
         V["variables.tf\n18 input variables"]
         L["locals.tf\nShared env map · tags"]
-        M["main.tf\nDynamoDB · Secrets · SQS · SNS"]
+        M["main.tf\nDynamoDB · SSM · SQS · SNS"]
         I["iam.tf\nRole + policy documents"]
         LM["lambda.tf\n4 functions + build trigger"]
         A["api_gateway.tf\nHTTP API v2"]
         C["cloudfront.tf\nGB geo restriction"]
         E["eventbridge.tf\n7 rules"]
-        MO["monitoring.tf\n5 alarms · CloudTrail"]
+        MO["monitoring.tf\n5 alarms · CloudTrail · S3"]
         O["outputs.tf"]
         B["build.sh\npip install + zip"]
     end
@@ -562,7 +570,7 @@ tofu apply
      --website-url https://yourdomain.com \
      --use-case-description "Weekly household filter reminder"
    ```
-3. **Secrets Manager** — populated automatically by `tofu apply` from `terraform.tfvars` values
+3. **SSM Parameter Store** — SecureString parameters populated automatically by `tofu apply` from `terraform.tfvars` values. Encryption uses AWS managed keys (no customer-managed KMS key required).
 
 **Optional channels:**
 

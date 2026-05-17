@@ -13,7 +13,10 @@ locals {
     WHATSAPP_REMINDER_TEMPLATE   = var.whatsapp_reminder_template
     WHATSAPP_ESCALATION_TEMPLATE = var.whatsapp_escalation_template
     WHATSAPP_CONGRATS_TEMPLATE   = var.whatsapp_congrats_template
-    SECRETS_ARN                  = aws_secretsmanager_secret.app.arn
+    PARAM_TWILIO_AUTH_TOKEN      = aws_ssm_parameter.twilio_auth_token.name
+    PARAM_WHATSAPP_ACCESS_TOKEN  = aws_ssm_parameter.whatsapp_access_token.name
+    PARAM_WIFE_EMAIL             = aws_ssm_parameter.wife_email.name
+    PARAM_WIFE_PHONE             = aws_ssm_parameter.wife_phone.name
     ALERT_TOPIC_ARN              = aws_sns_topic.alerts.arn
   }
 

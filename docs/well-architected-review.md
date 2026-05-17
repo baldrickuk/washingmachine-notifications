@@ -212,9 +212,8 @@ sequenceDiagram
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff'}}}%%
 
-pie title Monthly cost breakdown (~$0.40 total)
-    "Secrets Manager (1 secret)" : 85
-    "Everything else (free tier)" : 15
+pie title Monthly cost breakdown (~$0.00 total)
+    "Everything (free tier)" : 100
 ```
 
 | Service | Monthly usage | Monthly cost |
@@ -225,14 +224,14 @@ pie title Monthly cost breakdown (~$0.40 total)
 | CloudFront | ~5 requests | Free tier |
 | API Gateway | ~5 requests | Free tier |
 | EventBridge | 5 rules | Free |
-| Secrets Manager | 1 secret + ~40 GetSecretValue calls | **~$0.40** |
-| **Total** | | **~$0.40/month** |
+| SSM Parameter Store | 4 SecureString parameters + ~40 GetParameter calls | Free |
+| **Total** | | **~$0.00/month** |
 
 ### Findings
 
 | # | Finding | Risk | Recommendation |
 |---|---------|:----:|----------------|
-| COST-1 | **Secrets Manager at $0.40/month** — the single meaningful cost in this workload | 🟢 Low | SSM Parameter Store SecureString is free for standard parameters and would eliminate this cost. Trade-off: less auditable, no automatic rotation. At $0.40/month the trade-off does not justify migration. |
+| COST-1 | **Secrets Manager cost eliminated** — migrated from Secrets Manager (0.40/month) to SSM Parameter Store SecureString | ✅ ~~Low~~ | Resolved — moved all sensitive credentials to SSM Parameter Store SecureString parameters. Free tier, same encryption-at-rest. Trade-off (no automatic rotation) acceptable for this workload. |
 
 ### Best Practices Met
 
