@@ -697,11 +697,11 @@ def _notify_too_fast(elapsed_seconds: int) -> None:
     _send_pushover(
         message=(
             f"<b>That was {elapsed_seconds} seconds.</b>\n\n"
-            "The filter has not been cleaned in {elapsed_seconds} seconds. "
+            "The filter has not been cleaned in that time. "
             "It takes longer than that to find the washing machine.\n\n"
             "<font color=\"#C0392B\">Go and do a proper job. "
             "The link will still be there when you're done.</font>"
-        ).replace("{elapsed_seconds}", str(elapsed_seconds)),
+        ),
         title="🤨 Nice try.",
         html=True,
     )
