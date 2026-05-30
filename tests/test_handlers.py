@@ -483,6 +483,56 @@ class TestConfirmTask:
         assert "All done" in result["body"]
 
 
+class TestOriginVerify:
+    def _event(self, week="2026-05-17", token="test-token", test="0", headers=None):
+        return {
+            "queryStringParameters": {"week": week, "token": token, "test": test},
+            "headers": headers or {},
+        }
+
+    def setup_method(self):
+        app.table.reset_mock()
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+        }}
+
+    def test_missing_header_returns_403_when_enabled(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 403
+
+    def test_wrong_header_returns_403(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"):
+            result = app.confirm_task(
+                self._event(headers={"x-origin-verify": "wrong-secret"}), None
+            )
+        assert result["statusCode"] == 403
+
+    def test_correct_header_proceeds(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(
+                self._event(headers={"x-origin-verify": "correct-secret"}), None
+            )
+        assert result["statusCode"] == 200
+
+    def test_disabled_skips_check(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", False), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 200
+
+    def test_test_mode_bypasses_check(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(self._event(test="1"), None)
+        assert result["statusCode"] == 200
+
+
 class TestVerifyDelivery:
     def setup_method(self):
         app.table.reset_mock()

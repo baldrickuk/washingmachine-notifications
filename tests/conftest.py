@@ -12,6 +12,7 @@ os.environ.setdefault("SECRETS_ARN", "")
 os.environ.setdefault("ALERT_TOPIC_ARN", "")
 os.environ.setdefault("PARAM_PUSHOVER_APP_TOKEN", "")
 os.environ.setdefault("PARAM_PUSHOVER_USER_KEY", "")
+os.environ.setdefault("PARAM_ORIGIN_VERIFY_TOKEN", "")
 
 # Stub the AWS SDK so module-level boto3 calls don't hit real AWS
 _boto3_stub = MagicMock()
