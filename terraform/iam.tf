@@ -37,7 +37,7 @@ data "aws_iam_policy_document" "lambda_permissions" {
     effect  = "Allow"
     actions = ["ses:SendEmail"]
     resources = [
-      "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/*",
+      "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/${var.from_email}",
     ]
   }
 
@@ -50,7 +50,7 @@ data "aws_iam_policy_document" "lambda_permissions" {
     ]
     resources = [
       "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.stack_name}/*",
-      "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*",
+      data.aws_kms_key.ssm.arn,
     ]
   }
 
