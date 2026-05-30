@@ -581,15 +581,14 @@ def confirm_task(event, _context):
 
     now = _now_london()
 
-    if not is_test:
-        email_sent_at_str = item.get("email_sent_at", "")
-        if email_sent_at_str:
-            sent_at = datetime.fromisoformat(email_sent_at_str)
-            elapsed = (now - sent_at).total_seconds()
-            if elapsed < 120:
-                _log("Confirmation too fast", pk=pk, elapsed_seconds=int(elapsed), level="WARNING")
-                _notify_too_fast(int(elapsed))
-                return _html_response(200, _too_fast_page(int(elapsed)))
+    email_sent_at_str = item.get("email_sent_at", "")
+    if email_sent_at_str:
+        sent_at = datetime.fromisoformat(email_sent_at_str)
+        elapsed = (now - sent_at).total_seconds()
+        if elapsed < 120:
+            _log("Confirmation too fast", pk=pk, elapsed_seconds=int(elapsed), level="WARNING")
+            _notify_too_fast(int(elapsed))
+            return _html_response(200, _too_fast_page(int(elapsed)))
 
     sms_count = len(item.get("sms_dates", []))
 

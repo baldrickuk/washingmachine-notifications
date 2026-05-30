@@ -463,7 +463,7 @@ class TestConfirmTask:
         assert result["statusCode"] == 200
         assert "All done" in result["body"]
 
-    def test_test_mode_bypasses_too_fast_check(self):
+    def test_test_mode_also_enforces_too_fast_check(self):
         sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
         confirmed_at = datetime(2026, 5, 17, 9, 0, 5, tzinfo=LONDON_TZ)  # 5s later
         app.table.get_item.return_value = {"Item": {
@@ -471,10 +471,10 @@ class TestConfirmTask:
             "email_sent_at": sent_at.isoformat(),
         }}
         with patch.object(app, "_now_london", return_value=confirmed_at), \
-             patch.object(app, "_notify_congratulations"):
+             patch.object(app, "_notify_too_fast"):
             result = app.confirm_task(self._event(test="1"), None)
         assert result["statusCode"] == 200
-        assert "All done" in result["body"]
+        assert "All done" not in result["body"]
 
     def test_missing_email_sent_at_skips_timing_check(self):
         app.table.get_item.return_value = {"Item": {
