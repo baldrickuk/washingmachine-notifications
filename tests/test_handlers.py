@@ -371,6 +371,18 @@ class TestConfirmTask:
         result = app.confirm_task({}, None)
         assert result["statusCode"] == 400
 
+    def test_malformed_week_returns_400(self):
+        result = app.confirm_task(
+            {"queryStringParameters": {"week": "not-a-date", "token": "test-token"}}, None
+        )
+        assert result["statusCode"] == 400
+
+    def test_out_of_range_week_returns_400(self):
+        result = app.confirm_task(
+            {"queryStringParameters": {"week": "2026-13-99", "token": "test-token"}}, None
+        )
+        assert result["statusCode"] == 400
+
     def test_unknown_record_returns_404(self):
         app.table.get_item.return_value = {}
         result = app.confirm_task(self._event(), None)

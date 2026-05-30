@@ -563,7 +563,10 @@ def confirm_task(event, _context):
     if not week or not token:
         return _html_response(400, _error_page("Invalid confirmation link — missing parameters."))
 
-    pk = _week_pk(date.fromisoformat(week), is_test)
+    try:
+        pk = _week_pk(date.fromisoformat(week), is_test)
+    except ValueError:
+        return _html_response(400, _error_page("Invalid confirmation link — malformed date."))
     response = table.get_item(Key={"PK": pk})
 
     if "Item" not in response:
