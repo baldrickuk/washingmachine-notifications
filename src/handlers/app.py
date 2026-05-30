@@ -75,6 +75,7 @@ def _send_pushover(
     url: str = None,
     url_title: str = None,
     priority: int = 0,
+    html: bool = False,
 ) -> None:
     """POST a push notification to the Pushover API."""
     if not PUSHOVER_ENABLED:
@@ -91,6 +92,8 @@ def _send_pushover(
         payload["url"] = url
     if url_title:
         payload["url_title"] = url_title
+    if html:
+        payload["html"] = 1
     if priority == 2:
         payload["retry"] = 30
         payload["expire"] = 3600
@@ -117,13 +120,15 @@ def _notify_initial(confirm_url: str, is_test: bool):
         title = "[TEST] 🧺 Sunday. You know what that means." if is_test else "🧺 Sunday. You know what that means."
         _send_pushover(
             message=(
-                "The washing machine filter is waiting. "
-                "Clean it and tap the button below — or brace yourself for an escalating series "
-                "of increasingly unhinged daily reminders starting tomorrow at 08:00."
+                "<b>The washing machine filter requires your attention.</b>\n\n"
+                "Tap below to confirm once done — or tomorrow begins "
+                "<i>Day 1</i> of what will become an increasingly dramatic escalation sequence.\n\n"
+                "<font color=\"#888888\">The filter is watching. It has all week.</font>"
             ),
             title=title,
             url=confirm_url,
             url_title="Done — confirm here ✓",
+            html=True,
         )
     else:
         _send_email(confirm_url, is_test)
@@ -140,14 +145,21 @@ def _notify_reminder(sms_count: int, sunday: date):
             priority = 2
         if sms_count <= 1:
             reminder_title = "🧺 Friendly reminder"
+            plain = _escalating_sms(sms_count, sunday)
+            message = plain
         elif sms_count <= 4:
             reminder_title = "⚠️ Still waiting…"
+            plain = _escalating_sms(sms_count, sunday)
+            message = f"<font color=\"#E67E00\">{plain}</font>"
         else:
             reminder_title = "🚨 FILTER EMERGENCY"
+            plain = _escalating_sms(sms_count, sunday)
+            message = f"<font color=\"#C0392B\"><b>{plain}</b></font>"
         _send_pushover(
-            message=_escalating_sms(sms_count, sunday),
+            message=message,
             title=reminder_title,
             priority=priority,
+            html=sms_count > 1,
         )
     else:
         _log("Reminder skipped", reason="Pushover not configured", level="WARNING")
@@ -157,14 +169,18 @@ def _notify_congratulations(sms_count: int, animal: str):
     """Send a congratulations message via the configured channel."""
     if PUSHOVER_ENABLED:
         image_url = _fetch_animal_image(animal)
-        body = (
-            f"🎉 {_sms_commentary(sms_count)}\n\nAs your reward: {image_url}"
-            if image_url
-            else f"🎉 {_sms_commentary(sms_count)}"
-        )
+        commentary = _sms_commentary(sms_count)
+        if image_url:
+            body = (
+                f"<font color=\"#27AE60\"><b>{commentary}</b></font>"
+                f"\n\nAs your reward: <a href=\"{image_url}\">your {animal} awaits →</a>"
+            )
+        else:
+            body = f"<font color=\"#27AE60\"><b>{commentary}</b></font>"
         _send_pushover(
             message=body,
             title="🎉 The filter has been cleaned. Peace is restored.",
+            html=True,
         )
     else:
         _send_congratulations_email(sms_count, animal)
