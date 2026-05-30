@@ -1,6 +1,8 @@
 """Unit tests for Lambda handler logic."""
 import sys
 import os
+import urllib.error
+import urllib.parse
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -117,6 +119,147 @@ class TestLog:
         app._log("warning message", level="WARNING")
         out = capsys.readouterr().out.strip()
         assert json.loads(out)["level"] == "WARNING"
+
+
+class TestSendPushover:
+    def test_happy_path_posts_correct_body(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "PUSHOVER_APP_TOKEN", "app-token"), \
+             patch.object(app, "PUSHOVER_USER_KEY", "user-key"), \
+             patch("urllib.request.urlopen", return_value=MagicMock()) as mock_urlopen:
+            app._send_pushover("Hello", "Title", url="https://example.com", url_title="Click", priority=0)
+        mock_urlopen.assert_called_once()
+        req = mock_urlopen.call_args[0][0]
+        body = urllib.parse.parse_qs(req.data.decode())
+        assert body["token"] == ["app-token"]
+        assert body["user"] == ["user-key"]
+        assert body["message"] == ["Hello"]
+        assert body["title"] == ["Title"]
+        assert body["url"] == ["https://example.com"]
+        assert body["url_title"] == ["Click"]
+        assert body["priority"] == ["0"]
+        assert "retry" not in body
+        assert "expire" not in body
+
+    def test_disabled_no_http_call(self):
+        with patch.object(app, "PUSHOVER_ENABLED", False), \
+             patch("urllib.request.urlopen") as mock_urlopen:
+            app._send_pushover("Hello", "Title")
+        mock_urlopen.assert_not_called()
+
+    def test_emergency_priority_adds_retry_expire(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "PUSHOVER_APP_TOKEN", "app-token"), \
+             patch.object(app, "PUSHOVER_USER_KEY", "user-key"), \
+             patch("urllib.request.urlopen", return_value=MagicMock()) as mock_urlopen:
+            app._send_pushover("Alert!", "Title", priority=2)
+        req = mock_urlopen.call_args[0][0]
+        body = urllib.parse.parse_qs(req.data.decode())
+        assert body["priority"] == ["2"]
+        assert body["retry"] == ["30"]
+        assert body["expire"] == ["3600"]
+
+    def test_high_priority_no_retry_expire(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "PUSHOVER_APP_TOKEN", "app-token"), \
+             patch.object(app, "PUSHOVER_USER_KEY", "user-key"), \
+             patch("urllib.request.urlopen", return_value=MagicMock()) as mock_urlopen:
+            app._send_pushover("Hello", "Title", priority=1)
+        req = mock_urlopen.call_args[0][0]
+        body = urllib.parse.parse_qs(req.data.decode())
+        assert "retry" not in body
+        assert "expire" not in body
+
+    def test_url_error_caught_no_raise(self, capsys):
+        import json as _json
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "PUSHOVER_APP_TOKEN", "app-token"), \
+             patch.object(app, "PUSHOVER_USER_KEY", "user-key"), \
+             patch("urllib.request.urlopen", side_effect=urllib.error.URLError("network error")):
+            app._send_pushover("Hello", "Title")  # must not raise
+        out = capsys.readouterr().out.strip()
+        assert _json.loads(out)["level"] == "WARNING"
+
+    def test_url_omitted_when_not_provided(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "PUSHOVER_APP_TOKEN", "app-token"), \
+             patch.object(app, "PUSHOVER_USER_KEY", "user-key"), \
+             patch("urllib.request.urlopen", return_value=MagicMock()) as mock_urlopen:
+            app._send_pushover("Hello", "Title")
+        req = mock_urlopen.call_args[0][0]
+        body = urllib.parse.parse_qs(req.data.decode())
+        assert "url" not in body
+        assert "url_title" not in body
+
+
+class TestNotifyDispatchersPushover:
+    def test_notify_initial_calls_pushover_when_enabled(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "_send_pushover") as mock_push:
+            app._notify_initial("https://example.com/confirm?week=2026-05-17&token=abc", False)
+        mock_push.assert_called_once()
+        kwargs = mock_push.call_args.kwargs
+        assert kwargs["url"] == "https://example.com/confirm?week=2026-05-17&token=abc"
+        assert kwargs["url_title"] == "Done — confirm here ✓"
+
+    def test_notify_initial_calls_email_when_disabled(self):
+        with patch.object(app, "PUSHOVER_ENABLED", False), \
+             patch.object(app, "_send_email") as mock_email:
+            app._notify_initial("https://example.com/confirm", False)
+        mock_email.assert_called_once_with("https://example.com/confirm", False)
+
+    def test_notify_reminder_priority_normal(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "_send_pushover") as mock_push:
+            app._notify_reminder(0, date(2026, 5, 17))
+        assert mock_push.call_args.kwargs["priority"] == 0
+
+    def test_notify_reminder_priority_normal_count1(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "_send_pushover") as mock_push:
+            app._notify_reminder(1, date(2026, 5, 17))
+        assert mock_push.call_args.kwargs["priority"] == 0
+
+    def test_notify_reminder_priority_high(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "_send_pushover") as mock_push:
+            app._notify_reminder(2, date(2026, 5, 17))
+        assert mock_push.call_args.kwargs["priority"] == 1
+
+    def test_notify_reminder_priority_high_count4(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "_send_pushover") as mock_push:
+            app._notify_reminder(4, date(2026, 5, 17))
+        assert mock_push.call_args.kwargs["priority"] == 1
+
+    def test_notify_reminder_priority_emergency(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "_send_pushover") as mock_push:
+            app._notify_reminder(5, date(2026, 5, 17))
+        assert mock_push.call_args.kwargs["priority"] == 2
+
+    def test_notify_reminder_noop_when_disabled(self, capsys):
+        import json as _json
+        with patch.object(app, "PUSHOVER_ENABLED", False), \
+             patch.object(app, "_send_pushover") as mock_push:
+            app._notify_reminder(0, date(2026, 5, 17))
+        mock_push.assert_not_called()
+        out = capsys.readouterr().out.strip()
+        assert _json.loads(out)["level"] == "WARNING"
+
+    def test_notify_congratulations_calls_pushover_when_enabled(self):
+        with patch.object(app, "PUSHOVER_ENABLED", True), \
+             patch.object(app, "_send_pushover") as mock_push, \
+             patch.object(app, "_fetch_animal_image", return_value=""):
+            app._notify_congratulations(0, "bunny")
+        mock_push.assert_called_once()
+        assert mock_push.call_args.kwargs.get("priority", 0) == 0
+
+    def test_notify_congratulations_calls_email_when_disabled(self):
+        with patch.object(app, "PUSHOVER_ENABLED", False), \
+             patch.object(app, "_send_congratulations_email") as mock_email:
+            app._notify_congratulations(0, "bunny")
+        mock_email.assert_called_once_with(0, "bunny")
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +410,65 @@ class TestConfirmTask:
         app.table.update_item.assert_called_once()
         call_kwargs = app.table.update_item.call_args[1]
         assert call_kwargs["ExpressionAttributeValues"][":status"] == "CONFIRMED"
+
+    def test_too_fast_confirmation_returns_cheeky_page(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 1, 30, tzinfo=LONDON_TZ)  # 90s later
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        with patch.object(app, "_now_london", return_value=confirmed_at):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 200
+        assert "All done" not in result["body"]
+        assert "Already confirmed" not in result["body"]
+
+    def test_too_fast_confirmation_does_not_mark_confirmed(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 1, 30, tzinfo=LONDON_TZ)  # 90s later
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        app.table.update_item.reset_mock()
+        with patch.object(app, "_now_london", return_value=confirmed_at):
+            app.confirm_task(self._event(), None)
+        app.table.update_item.assert_not_called()
+
+    def test_exactly_120s_confirmation_proceeds_normally(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 2, 0, tzinfo=LONDON_TZ)  # exactly 120s
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        with patch.object(app, "_now_london", return_value=confirmed_at), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 200
+        assert "All done" in result["body"]
+
+    def test_test_mode_also_enforces_too_fast_check(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 0, 5, tzinfo=LONDON_TZ)  # 5s later
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        with patch.object(app, "_now_london", return_value=confirmed_at):
+            result = app.confirm_task(self._event(test="1"), None)
+        assert result["statusCode"] == 200
+        assert "All done" not in result["body"]
+
+    def test_missing_email_sent_at_skips_timing_check(self):
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+        }}
+        with patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 200
+        assert "All done" in result["body"]
 
 
 class TestVerifyDelivery:

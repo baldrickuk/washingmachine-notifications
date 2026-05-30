@@ -30,12 +30,6 @@ rm -rf \
   "${BUILD_DIR}"/python_dateutil* \
   "${BUILD_DIR}"/dateutil
 
-# Install Twilio only when enabled — it adds ~29 MB to the package
-if [ "${TWILIO_ENABLED:-false}" = "true" ]; then
-  echo "Installing Twilio SDK (TWILIO_ENABLED=true)..."
-  pip3 install "twilio>=9.0" -t "${BUILD_DIR}" --quiet --no-cache-dir
-fi
-
 cp "${HANDLERS}/app.py" "${BUILD_DIR}/"
 
 cd "${BUILD_DIR}"
