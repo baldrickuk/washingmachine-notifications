@@ -9,3 +9,7 @@ venv/
 # Terraform — sensitive values and local state
 # (per-directory .gitignore in terraform/ covers build artefacts and state)
 terraform/terraform.tfvars
+
+# Deprecated SAM artefacts — .aws-sam/ is a build dir, samconfig.toml may contain PII
+.aws-sam/
+samconfig.toml

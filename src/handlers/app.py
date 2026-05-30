@@ -12,7 +12,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 LONDON_TZ = ZoneInfo("Europe/London")
-TEST_SMS_INTERVAL_SECONDS = 600  # 10 minutes
+TEST_SMS_INTERVAL_SECONDS = int(os.environ.get("TEST_SMS_INTERVAL_SECONDS", "30"))
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 FROM_EMAIL = os.environ["FROM_EMAIL"]
@@ -123,11 +123,12 @@ def _notify_initial(confirm_url: str, is_test: bool):
                 "<b>The washing machine filter requires your attention.</b>\n\n"
                 "Tap below to confirm once done — or tomorrow begins "
                 "<i>Day 1</i> of what will become an increasingly dramatic escalation sequence.\n\n"
+                f"<a href=\"{confirm_url}\"><b>✓ Done — confirm here</b></a>\n\n"
                 "<font color=\"#888888\">The filter is watching. It has all week.</font>"
             ),
             title=title,
             url=confirm_url,
-            url_title="Done — confirm here ✓",
+            url_title="✓ Done — confirm here",
             html=True,
         )
     else:
