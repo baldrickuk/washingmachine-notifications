@@ -53,7 +53,7 @@
     {
       "id": "b205f5e1-0133-4af9-863c-7a19f7ac75a2",
       "numericId": 1,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Lock down the execute-api origin so CloudFront is the only path: inject a CloudFront origin custom header secret (stored in SSM) and validate it in ConfirmTask or via an API Gateway authorizer/WAF; stop publishing the direct origin URL output.",
       "tags": [
         "M01"
@@ -62,7 +62,7 @@
     {
       "id": "511d4912-0256-4929-9276-f59d8b76c54d",
       "numericId": 2,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Wrap date.fromisoformat(week) in try/except ValueError returning a 400 error page, and validate the token format before lookup.",
       "tags": [
         "M02"
@@ -71,7 +71,7 @@
     {
       "id": "1dbcfbe4-0a95-42ab-a748-41e30e026f77",
       "numericId": 3,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Create a customer-managed KMS key for the SSM SecureStrings and scope kms:Decrypt in iam.tf to that specific key ARN (optionally with a kms:ViaService=ssm condition), removing the key/* wildcard.",
       "tags": [
         "M03"
@@ -80,7 +80,7 @@
     {
       "id": "f2f78521-5211-44a2-8e03-3281d8070e85",
       "numericId": 4,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Restrict ses:SendEmail in iam.tf to the single verified FROM_EMAIL identity ARN and add an ses:FromAddress condition, removing the identity/* wildcard.",
       "tags": [
         "M04"
@@ -89,7 +89,7 @@
     {
       "id": "b388c07b-7781-4f73-9eea-4255fa63db8e",
       "numericId": 5,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Set reserved_concurrent_executions on the confirm_task Lambda, add AWS Budgets alerting, and combine with origin lockdown (M01) and a rate-based WAF.",
       "tags": [
         "M05"
@@ -98,7 +98,7 @@
     {
       "id": "d57a8a37-bca4-424d-b8da-22bb8b312d4d",
       "numericId": 6,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Pin and hash-lock dependencies (pip --require-hashes), generate an SBOM, enable Dependabot, and optionally run the Lambda in a VPC with an egress allowlist to api.pushover.net; least-privilege (M03/M04) limits blast radius.",
       "tags": [
         "M06"
@@ -107,7 +107,7 @@
     {
       "id": "10b40b12-db80-46ca-8f28-a34b72dc2b22",
       "numericId": 7,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Use hmac.compare_digest for the token comparison in confirm_task to eliminate the timing side channel.",
       "tags": [
         "M07"
@@ -116,7 +116,7 @@
     {
       "id": "a9996999-69da-46bc-affd-6ddf5d13a8d3",
       "numericId": 8,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Enable SSE on the DLQ via sqs_managed_sse_enabled=true or a customer-managed kms_master_key_id on aws_sqs_queue.dlq.",
       "tags": [
         "M08"
@@ -125,7 +125,7 @@
     {
       "id": "9347af95-e9c3-4a8a-a822-f4ac34c4c601",
       "numericId": 9,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Set kms_master_key_id on the SNS alerts topic, add a topic policy restricting sns:Subscribe, and avoid embedding the DynamoDB partition key in alert text.",
       "tags": [
         "M09"
@@ -134,7 +134,7 @@
     {
       "id": "b571dd91-1951-40bf-a2bc-5d1c647cba5e",
       "numericId": 10,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Harden the audit bucket: add aws_s3_bucket_public_access_block, SSE configuration, versioning and Object Lock, and enable CloudTrail log-file validation.",
       "tags": [
         "M10"
@@ -143,7 +143,7 @@
     {
       "id": "35887c3c-9a73-4d84-8747-3219adac5dbc",
       "numericId": 11,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Publish SPF, DKIM and a DMARC p=reject policy for the sender domain and verify DKIM in SES.",
       "tags": [
         "M11"
@@ -152,7 +152,7 @@
     {
       "id": "8de9fa58-1ccf-4298-9b36-dfce12b2d024",
       "numericId": 12,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Attach a WAF WebACL (rate-based + bot rules) and access logging to the CloudFront distribution and set an explicit modern minimum viewer TLS version.",
       "tags": [
         "M12"
@@ -161,7 +161,7 @@
     {
       "id": "e8319068-6396-4809-b456-33e11aa7b76b",
       "numericId": 13,
-      "status": "mitigationImplemented",
+      "status": "mitigationResolved",
       "content": "Idempotent re-click handling, 30-day TTL and HTTPS already limit link-replay impact; remaining residual (forwarding to a third party) is accepted as a domestic risk. Optional hardening: one-time token invalidated on first use.",
       "tags": [
         "M13"
@@ -170,7 +170,7 @@
     {
       "id": "9e2bedb2-6bc4-49d3-8362-2a693459fb88",
       "numericId": 14,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Keep the animal value operator-controlled only; if it ever becomes user-influenced, allowlist permitted image hosts and validate the resolved URL host.",
       "tags": [
         "M14"
@@ -179,7 +179,7 @@
     {
       "id": "1a96e8be-9cab-4207-a43f-7a8199afc6ce",
       "numericId": 15,
-      "status": "mitigationImplemented",
+      "status": "mitigationResolved",
       "content": "No public DynamoDB write path exists and CloudTrail data events record changes; least-privilege role scoping (M03/M04) further reduces risk. Add an alert on UpdateItem outside expected handlers.",
       "tags": [
         "M15"
@@ -188,7 +188,7 @@
     {
       "id": "70c30952-1dad-4585-868b-3be70ea91ba8",
       "numericId": 16,
-      "status": "mitigationProposed",
+      "status": "mitigationIdentified",
       "content": "Log the API Gateway v2 request-context source IP and User-Agent in confirm_task for attributable confirmation records.",
       "tags": [
         "M16"
@@ -197,7 +197,7 @@
     {
       "id": "4aced761-a4a9-4407-9a19-f842f6d4c3c7",
       "numericId": 17,
-      "status": "mitigationImplemented",
+      "status": "mitigationResolved",
       "content": "The test rule is disabled by default, TEST# keys isolate test state, and Lambda permissions are source_arn-scoped with DST guards; further restrict events:EnableRule and lambda:InvokeFunction via permission boundaries/SCPs and remove the test rule from production.",
       "tags": [
         "M17"
