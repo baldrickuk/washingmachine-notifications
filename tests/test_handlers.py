@@ -396,6 +396,16 @@ class TestConfirmTask:
         assert result["statusCode"] == 200
         assert "Already confirmed" in result["body"]
 
+    def test_token_comparison_is_timing_safe(self):
+        import hmac as _hmac
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": []
+        }}
+        with patch.object(app, "_notify_congratulations"), \
+             patch("hmac.compare_digest", wraps=_hmac.compare_digest) as mock_digest:
+            app.confirm_task(self._event(), None)
+        mock_digest.assert_called()
+
     def test_invalid_token_returns_403(self):
         app.table.get_item.return_value = {"Item": {
             "status": "PENDING", "token": "correct-token", "sms_dates": []

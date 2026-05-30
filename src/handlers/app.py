@@ -589,7 +589,7 @@ def confirm_task(event, _context):
     if item["status"] == "CONFIRMED":
         return _html_response(200, _already_confirmed_page())
 
-    if item["token"] != token:
+    if not hmac.compare_digest(item["token"], token):
         _log("Invalid token presented", pk=pk, level="WARNING")
         return _html_response(403, _error_page("Invalid confirmation token."))
 
