@@ -200,7 +200,7 @@ class TestNotifyDispatchersPushover:
         mock_push.assert_called_once()
         kwargs = mock_push.call_args.kwargs
         assert kwargs["url"] == "https://example.com/confirm?week=2026-05-17&token=abc"
-        assert kwargs["url_title"] == "Confirm filter cleaned ✓"
+        assert kwargs["url_title"] == "Done — confirm here ✓"
 
     def test_notify_initial_calls_email_when_disabled(self):
         with patch.object(app, "PUSHOVER_ENABLED", False), \

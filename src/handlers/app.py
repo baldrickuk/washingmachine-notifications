@@ -114,12 +114,16 @@ def _send_pushover(
 def _notify_initial(confirm_url: str, is_test: bool):
     """Send the initial weekly reminder via the configured channel."""
     if PUSHOVER_ENABLED:
-        prefix = "[TEST] " if is_test else ""
+        title = "[TEST] 🧺 Sunday. You know what that means." if is_test else "🧺 Sunday. You know what that means."
         _send_pushover(
-            message=f"{prefix}It's time to clean the washing machine filter!",
-            title="Washing Machine Filter Reminder",
+            message=(
+                "The washing machine filter is waiting. "
+                "Clean it and tap the button below — or brace yourself for an escalating series "
+                "of increasingly unhinged daily reminders starting tomorrow at 08:00."
+            ),
+            title=title,
             url=confirm_url,
-            url_title="Confirm filter cleaned ✓",
+            url_title="Done — confirm here ✓",
         )
     else:
         _send_email(confirm_url, is_test)
@@ -134,9 +138,15 @@ def _notify_reminder(sms_count: int, sunday: date):
             priority = 1
         else:
             priority = 2
+        if sms_count <= 1:
+            reminder_title = "🧺 Friendly reminder"
+        elif sms_count <= 4:
+            reminder_title = "⚠️ Still waiting…"
+        else:
+            reminder_title = "🚨 FILTER EMERGENCY"
         _send_pushover(
             message=_escalating_sms(sms_count, sunday),
-            title="Washing Machine Filter Reminder",
+            title=reminder_title,
             priority=priority,
         )
     else:
@@ -154,7 +164,7 @@ def _notify_congratulations(sms_count: int, animal: str):
         )
         _send_pushover(
             message=body,
-            title="Filter cleaned! 🎉",
+            title="🎉 The filter has been cleaned. Peace is restored.",
         )
     else:
         _send_congratulations_email(sms_count, animal)
