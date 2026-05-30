@@ -12,7 +12,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 LONDON_TZ = ZoneInfo("Europe/London")
-TEST_SMS_INTERVAL_SECONDS = 600  # 10 minutes
+TEST_SMS_INTERVAL_SECONDS = int(os.environ.get("TEST_SMS_INTERVAL_SECONDS", "30"))
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 FROM_EMAIL = os.environ["FROM_EMAIL"]

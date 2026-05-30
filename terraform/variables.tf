@@ -38,6 +38,12 @@ variable "animal_type" {
   default     = "bunny"
 }
 
+variable "test_sms_interval_seconds" {
+  description = "Minimum seconds between test reminders (default 30)"
+  type        = number
+  default     = 30
+}
+
 variable "pushover_app_token" {
   description = "Pushover application token (stored in SSM SecureString)"
   type        = string
