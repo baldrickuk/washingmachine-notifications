@@ -9,3 +9,7 @@ venv/
 # Terraform — sensitive values and local state
 # (per-directory .gitignore in terraform/ covers build artefacts and state)
 terraform/terraform.tfvars
+
+# AWS SAM build artefacts and config (may contain PII/credentials)
+.aws-sam/
+samconfig.toml

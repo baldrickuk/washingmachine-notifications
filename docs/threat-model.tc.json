@@ -1,0 +1,922 @@
+{
+  "schema": 1,
+  "applicationInfo": {
+    "name": "washingmachine-notifications",
+    "description": "Threat model v2.0 for the AWS serverless washing-machine filter reminder system (Terraform + Lambda/app.py, SES + Pushover, SSM Parameter Store). STRIDE + DREAD + MITRE ATT&CK Cloud. 0 critical, 5 high, 9 medium, 5 low."
+  },
+  "architecture": {
+    "image": "",
+    "description": "EventBridge (GMT+BST) -> 4 Lambda handlers (send_weekly_email, send_daily_sms, confirm_task, verify_delivery). DynamoDB reminders table; SSM SecureString for Pushover creds + recipient PII; SES email; Pushover push. Internet -> CloudFront (GB geo whitelist) -> API Gateway HTTP API -> ConfirmTask, with the execute-api origin also publicly reachable (weak boundary). SQS DLQ, SNS alerts, CloudWatch alarms, CloudTrail DynamoDB data events to an S3 audit bucket. Single shared IAM role."
+  },
+  "dataflow": {
+    "image": "",
+    "description": "See docs/threat-model.md section 2 for the full text DFD, external entities, processes, data stores, data flows and trust boundaries TB1-TB7."
+  },
+  "assumptions": [
+    {
+      "id": "79999b42-558b-411a-b874-d779335a23e5",
+      "numericId": 1,
+      "content": "The AWS account root has MFA enabled and administrative IAM is tightly controlled and out of scope."
+    },
+    {
+      "id": "cf83ff29-ffd0-4d30-9c1f-bf49659de716",
+      "numericId": 2,
+      "content": "terraform.tfvars and samconfig.toml are gitignored and never committed; secrets are only in SSM SecureString."
+    },
+    {
+      "id": "96296d18-2606-4146-877c-d71250fad969",
+      "numericId": 3,
+      "content": "A separate management-events CloudTrail captures SSM and IAM activity; the application trail logs only DynamoDB data events."
+    },
+    {
+      "id": "90f9a60e-4bbd-4d13-a605-c67d0342ae82",
+      "numericId": 4,
+      "content": "SES is or will be in production sending mode, which widens the impact of the ses:SendEmail wildcard (T04)."
+    },
+    {
+      "id": "06be63c2-ace6-4e71-85d2-e2d08039740b",
+      "numericId": 5,
+      "content": "Pushover and the third-party animal-image APIs are trusted only to the extent of TLS transport."
+    },
+    {
+      "id": "adea024d-bb47-43d8-bebe-bbfb7b64097d",
+      "numericId": 6,
+      "content": "The recipient's mailbox and device security are the recipient's responsibility and govern the link-forwarding risk (T07)."
+    },
+    {
+      "id": "fb666fcc-a8d0-4f3b-b647-70f2d94bfc13",
+      "numericId": 7,
+      "content": "Twilio/WhatsApp channels referenced in older docs are not present in the live code (SES + Pushover only) and are treated as documentation drift, not live attack surface."
+    }
+  ],
+  "mitigations": [
+    {
+      "id": "b205f5e1-0133-4af9-863c-7a19f7ac75a2",
+      "numericId": 1,
+      "status": "mitigationProposed",
+      "content": "Lock down the execute-api origin so CloudFront is the only path: inject a CloudFront origin custom header secret (stored in SSM) and validate it in ConfirmTask or via an API Gateway authorizer/WAF; stop publishing the direct origin URL output.",
+      "tags": [
+        "M01"
+      ]
+    },
+    {
+      "id": "511d4912-0256-4929-9276-f59d8b76c54d",
+      "numericId": 2,
+      "status": "mitigationProposed",
+      "content": "Wrap date.fromisoformat(week) in try/except ValueError returning a 400 error page, and validate the token format before lookup.",
+      "tags": [
+        "M02"
+      ]
+    },
+    {
+      "id": "1dbcfbe4-0a95-42ab-a748-41e30e026f77",
+      "numericId": 3,
+      "status": "mitigationProposed",
+      "content": "Create a customer-managed KMS key for the SSM SecureStrings and scope kms:Decrypt in iam.tf to that specific key ARN (optionally with a kms:ViaService=ssm condition), removing the key/* wildcard.",
+      "tags": [
+        "M03"
+      ]
+    },
+    {
+      "id": "f2f78521-5211-44a2-8e03-3281d8070e85",
+      "numericId": 4,
+      "status": "mitigationProposed",
+      "content": "Restrict ses:SendEmail in iam.tf to the single verified FROM_EMAIL identity ARN and add an ses:FromAddress condition, removing the identity/* wildcard.",
+      "tags": [
+        "M04"
+      ]
+    },
+    {
+      "id": "b388c07b-7781-4f73-9eea-4255fa63db8e",
+      "numericId": 5,
+      "status": "mitigationProposed",
+      "content": "Set reserved_concurrent_executions on the confirm_task Lambda, add AWS Budgets alerting, and combine with origin lockdown (M01) and a rate-based WAF.",
+      "tags": [
+        "M05"
+      ]
+    },
+    {
+      "id": "d57a8a37-bca4-424d-b8da-22bb8b312d4d",
+      "numericId": 6,
+      "status": "mitigationProposed",
+      "content": "Pin and hash-lock dependencies (pip --require-hashes), generate an SBOM, enable Dependabot, and optionally run the Lambda in a VPC with an egress allowlist to api.pushover.net; least-privilege (M03/M04) limits blast radius.",
+      "tags": [
+        "M06"
+      ]
+    },
+    {
+      "id": "10b40b12-db80-46ca-8f28-a34b72dc2b22",
+      "numericId": 7,
+      "status": "mitigationProposed",
+      "content": "Use hmac.compare_digest for the token comparison in confirm_task to eliminate the timing side channel.",
+      "tags": [
+        "M07"
+      ]
+    },
+    {
+      "id": "a9996999-69da-46bc-affd-6ddf5d13a8d3",
+      "numericId": 8,
+      "status": "mitigationProposed",
+      "content": "Enable SSE on the DLQ via sqs_managed_sse_enabled=true or a customer-managed kms_master_key_id on aws_sqs_queue.dlq.",
+      "tags": [
+        "M08"
+      ]
+    },
+    {
+      "id": "9347af95-e9c3-4a8a-a822-f4ac34c4c601",
+      "numericId": 9,
+      "status": "mitigationProposed",
+      "content": "Set kms_master_key_id on the SNS alerts topic, add a topic policy restricting sns:Subscribe, and avoid embedding the DynamoDB partition key in alert text.",
+      "tags": [
+        "M09"
+      ]
+    },
+    {
+      "id": "b571dd91-1951-40bf-a2bc-5d1c647cba5e",
+      "numericId": 10,
+      "status": "mitigationProposed",
+      "content": "Harden the audit bucket: add aws_s3_bucket_public_access_block, SSE configuration, versioning and Object Lock, and enable CloudTrail log-file validation.",
+      "tags": [
+        "M10"
+      ]
+    },
+    {
+      "id": "35887c3c-9a73-4d84-8747-3219adac5dbc",
+      "numericId": 11,
+      "status": "mitigationProposed",
+      "content": "Publish SPF, DKIM and a DMARC p=reject policy for the sender domain and verify DKIM in SES.",
+      "tags": [
+        "M11"
+      ]
+    },
+    {
+      "id": "8de9fa58-1ccf-4298-9b36-dfce12b2d024",
+      "numericId": 12,
+      "status": "mitigationProposed",
+      "content": "Attach a WAF WebACL (rate-based + bot rules) and access logging to the CloudFront distribution and set an explicit modern minimum viewer TLS version.",
+      "tags": [
+        "M12"
+      ]
+    },
+    {
+      "id": "e8319068-6396-4809-b456-33e11aa7b76b",
+      "numericId": 13,
+      "status": "mitigationImplemented",
+      "content": "Idempotent re-click handling, 30-day TTL and HTTPS already limit link-replay impact; remaining residual (forwarding to a third party) is accepted as a domestic risk. Optional hardening: one-time token invalidated on first use.",
+      "tags": [
+        "M13"
+      ]
+    },
+    {
+      "id": "9e2bedb2-6bc4-49d3-8362-2a693459fb88",
+      "numericId": 14,
+      "status": "mitigationProposed",
+      "content": "Keep the animal value operator-controlled only; if it ever becomes user-influenced, allowlist permitted image hosts and validate the resolved URL host.",
+      "tags": [
+        "M14"
+      ]
+    },
+    {
+      "id": "1a96e8be-9cab-4207-a43f-7a8199afc6ce",
+      "numericId": 15,
+      "status": "mitigationImplemented",
+      "content": "No public DynamoDB write path exists and CloudTrail data events record changes; least-privilege role scoping (M03/M04) further reduces risk. Add an alert on UpdateItem outside expected handlers.",
+      "tags": [
+        "M15"
+      ]
+    },
+    {
+      "id": "70c30952-1dad-4585-868b-3be70ea91ba8",
+      "numericId": 16,
+      "status": "mitigationProposed",
+      "content": "Log the API Gateway v2 request-context source IP and User-Agent in confirm_task for attributable confirmation records.",
+      "tags": [
+        "M16"
+      ]
+    },
+    {
+      "id": "4aced761-a4a9-4407-9a19-f842f6d4c3c7",
+      "numericId": 17,
+      "status": "mitigationImplemented",
+      "content": "The test rule is disabled by default, TEST# keys isolate test state, and Lambda permissions are source_arn-scoped with DST guards; further restrict events:EnableRule and lambda:InvokeFunction via permission boundaries/SCPs and remove the test rule from production.",
+      "tags": [
+        "M17"
+      ]
+    }
+  ],
+  "assumptionLinks": [],
+  "mitigationLinks": [
+    {
+      "mitigationId": "b205f5e1-0133-4af9-863c-7a19f7ac75a2",
+      "linkedId": "7230240c-e762-4d41-bcfb-07fae8cdcd8d"
+    },
+    {
+      "mitigationId": "511d4912-0256-4929-9276-f59d8b76c54d",
+      "linkedId": "b01d194a-701e-4f7f-b5e0-6cd5f3ca91cc"
+    },
+    {
+      "mitigationId": "1dbcfbe4-0a95-42ab-a748-41e30e026f77",
+      "linkedId": "74cfff03-2d2d-481f-8366-82b7735bec68"
+    },
+    {
+      "mitigationId": "1dbcfbe4-0a95-42ab-a748-41e30e026f77",
+      "linkedId": "3de40b8b-d449-49d1-9092-7f8a16e56602"
+    },
+    {
+      "mitigationId": "f2f78521-5211-44a2-8e03-3281d8070e85",
+      "linkedId": "a335dadb-d23e-4355-bc40-b65cb6c95f79"
+    },
+    {
+      "mitigationId": "b388c07b-7781-4f73-9eea-4255fa63db8e",
+      "linkedId": "528ad24a-1796-4bbc-aa8c-ff94f77dc1e3"
+    },
+    {
+      "mitigationId": "d57a8a37-bca4-424d-b8da-22bb8b312d4d",
+      "linkedId": "9fdb8c5c-c0ea-4f44-b928-52f821e00fe8"
+    },
+    {
+      "mitigationId": "10b40b12-db80-46ca-8f28-a34b72dc2b22",
+      "linkedId": "2f2120f4-fdff-495f-b6b4-17b2d1d8d44b"
+    },
+    {
+      "mitigationId": "a9996999-69da-46bc-affd-6ddf5d13a8d3",
+      "linkedId": "e47dbc6f-0147-4fd8-a579-f90ecb8d3d4b"
+    },
+    {
+      "mitigationId": "9347af95-e9c3-4a8a-a822-f4ac34c4c601",
+      "linkedId": "4232cd57-9d97-4043-b3a6-d7ccf51556e7"
+    },
+    {
+      "mitigationId": "b571dd91-1951-40bf-a2bc-5d1c647cba5e",
+      "linkedId": "9360c686-5c9c-4956-87eb-7db963c865a5"
+    },
+    {
+      "mitigationId": "35887c3c-9a73-4d84-8747-3219adac5dbc",
+      "linkedId": "1623b562-2b34-4d87-a1a2-a1f6df718e78"
+    },
+    {
+      "mitigationId": "8de9fa58-1ccf-4298-9b36-dfce12b2d024",
+      "linkedId": "d8d37bc9-7334-41de-ac97-1eca54b8d122"
+    },
+    {
+      "mitigationId": "e8319068-6396-4809-b456-33e11aa7b76b",
+      "linkedId": "ae052e65-7e42-4099-b078-765ca2945c9f"
+    },
+    {
+      "mitigationId": "9e2bedb2-6bc4-49d3-8362-2a693459fb88",
+      "linkedId": "cc7c4076-8288-42a7-b4ee-cd07117036a2"
+    },
+    {
+      "mitigationId": "1a96e8be-9cab-4207-a43f-7a8199afc6ce",
+      "linkedId": "96166ad4-8c46-425e-ad8e-2cb8804d274c"
+    },
+    {
+      "mitigationId": "70c30952-1dad-4585-868b-3be70ea91ba8",
+      "linkedId": "1c2fcff8-ca44-442d-a5c0-3c9d4ce493b7"
+    },
+    {
+      "mitigationId": "4aced761-a4a9-4407-9a19-f842f6d4c3c7",
+      "linkedId": "2ad87a63-22ac-43b3-9a40-f450f4390462"
+    },
+    {
+      "mitigationId": "4aced761-a4a9-4407-9a19-f842f6d4c3c7",
+      "linkedId": "ec9d01cf-9a97-4e15-a060-b8f2f1ef8822"
+    }
+  ],
+  "threats": [
+    {
+      "id": "7230240c-e762-4d41-bcfb-07fae8cdcd8d",
+      "numericId": 1,
+      "displayOrder": 1,
+      "status": "threatIdentified",
+      "statement": "A remote internet attacker that knows the public execute-api origin hostname can send requests directly to the API Gateway origin, bypassing the CloudFront GB geo-restriction, which leads to unrestricted global reach and DoS exposure of the confirmation endpoint, resulting in reduced confidentiality, integrity and availability of the confirmation flow and the geo-restriction control.",
+      "threatSource": "remote internet attacker",
+      "threatAction": "bypass the CloudFront GB geo-restriction by calling the execute-api origin directly",
+      "threatImpact": "loss of the documented geo control and direct DoS/brute-force surface",
+      "impactedAssets": [
+        "API Gateway /confirm endpoint",
+        "ConfirmTask Lambda"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "S",
+            "T",
+            "D"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "High"
+        },
+        {
+          "key": "DREAD",
+          "value": "7.8"
+        }
+      ],
+      "tags": [
+        "T01"
+      ]
+    },
+    {
+      "id": "b01d194a-701e-4f7f-b5e0-6cd5f3ca91cc",
+      "numericId": 2,
+      "displayOrder": 2,
+      "status": "threatIdentified",
+      "statement": "A remote internet attacker that submits a malformed week query parameter can trigger an unhandled ValueError in date.fromisoformat, which leads to repeated 5xx errors and CloudWatch alarm noise, resulting in reduced availability and integrity of the confirmation service and its monitoring.",
+      "threatSource": "remote internet attacker",
+      "threatAction": "send a malformed week parameter that raises an unhandled exception",
+      "threatImpact": "repeatable 5xx errors and alarm fatigue",
+      "impactedAssets": [
+        "ConfirmTask Lambda",
+        "confirm-task-errors alarm"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "D",
+            "T"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "High"
+        },
+        {
+          "key": "DREAD",
+          "value": "7.2"
+        }
+      ],
+      "tags": [
+        "T02"
+      ]
+    },
+    {
+      "id": "74cfff03-2d2d-481f-8366-82b7735bec68",
+      "numericId": 3,
+      "displayOrder": 3,
+      "status": "threatIdentified",
+      "statement": "A compromised dependency running under the Lambda execution role that inherits kms:Decrypt on key/* can decrypt ciphertext protected by unrelated KMS keys across the account, which leads to cross-workload secret disclosure, resulting in reduced confidentiality of data belonging to other workloads in the account.",
+      "threatSource": "compromised dependency under the Lambda role",
+      "threatAction": "decrypt arbitrary account KMS ciphertext via the key/* wildcard",
+      "threatImpact": "cross-workload secret decryption",
+      "impactedAssets": [
+        "account KMS keys",
+        "other workloads' encrypted data"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "E",
+            "I"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "High"
+        },
+        {
+          "key": "DREAD",
+          "value": "6.6"
+        }
+      ],
+      "tags": [
+        "T03"
+      ]
+    },
+    {
+      "id": "a335dadb-d23e-4355-bc40-b65cb6c95f79",
+      "numericId": 4,
+      "displayOrder": 4,
+      "status": "threatIdentified",
+      "statement": "A compromised dependency running under the Lambda execution role that holds ses:SendEmail on identity/* can send email from any verified identity in the account, which leads to domain spoofing and reputation abuse, resulting in reduced integrity and availability of the account's SES sending reputation and sender domains.",
+      "threatSource": "compromised dependency under the Lambda role",
+      "threatAction": "send email from any verified SES identity via the identity/* wildcard",
+      "threatImpact": "phishing/spam and SES reputation damage",
+      "impactedAssets": [
+        "SES verified identities",
+        "sender domain reputation"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "S",
+            "E"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "High"
+        },
+        {
+          "key": "DREAD",
+          "value": "6.4"
+        }
+      ],
+      "tags": [
+        "T04"
+      ]
+    },
+    {
+      "id": "528ad24a-1796-4bbc-aa8c-ff94f77dc1e3",
+      "numericId": 5,
+      "displayOrder": 5,
+      "status": "threatIdentified",
+      "statement": "A remote internet attacker that floods the confirmation endpoint while ConfirmTask has no reserved concurrency can exhaust shared account Lambda concurrency and inflate DynamoDB and CloudWatch cost, which leads to denial of service for sibling functions and bill inflation, resulting in reduced availability of all four Lambda handlers and cost integrity.",
+      "threatSource": "remote internet attacker",
+      "threatAction": "exhaust shared account concurrency by flooding ConfirmTask",
+      "threatImpact": "DoS of sibling functions and cost inflation",
+      "impactedAssets": [
+        "all Lambda handlers",
+        "DynamoDB on-demand capacity",
+        "AWS bill"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "D"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "High"
+        },
+        {
+          "key": "DREAD",
+          "value": "6.2"
+        }
+      ],
+      "tags": [
+        "T05"
+      ]
+    },
+    {
+      "id": "9fdb8c5c-c0ea-4f44-b928-52f821e00fe8",
+      "numericId": 6,
+      "displayOrder": 6,
+      "status": "threatIdentified",
+      "statement": "A compromised pip dependency that executes inside the Lambda runtime can read the cached _PARAMS credentials and PII and exfiltrate them over unrestricted HTTPS egress, which leads to theft of Pushover credentials and recipient PII, resulting in reduced confidentiality of the recipient PII and Pushover credentials.",
+      "threatSource": "compromised pip dependency",
+      "threatAction": "read cached credentials/PII and exfiltrate them over outbound HTTPS",
+      "threatImpact": "theft of credentials and recipient PII",
+      "impactedAssets": [
+        "Pushover credentials",
+        "recipient email and phone PII"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "I",
+            "E"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "5.8"
+        }
+      ],
+      "tags": [
+        "T06"
+      ]
+    },
+    {
+      "id": "ae052e65-7e42-4099-b078-765ca2945c9f",
+      "numericId": 7,
+      "displayOrder": 7,
+      "status": "threatIdentified",
+      "statement": "A holder of a forwarded or intercepted confirmation link that is not bound to the recipient can click it to mark the task confirmed, which leads to a false confirmation that silences reminders, resulting in reduced integrity of the task confirmation state.",
+      "threatSource": "holder of a forwarded/intercepted confirmation link",
+      "threatAction": "confirm the task using an unbound bearer token link",
+      "threatImpact": "false confirmation and silenced reminders",
+      "impactedAssets": [
+        "task confirmation state"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "S",
+            "R"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "5.8"
+        }
+      ],
+      "tags": [
+        "T07"
+      ]
+    },
+    {
+      "id": "2f2120f4-fdff-495f-b6b4-17b2d1d8d44b",
+      "numericId": 8,
+      "displayOrder": 8,
+      "status": "threatIdentified",
+      "statement": "A remote attacker that can issue many timed requests against a known week partition key can exploit the non-constant-time token comparison as a timing oracle, which leads to incremental token recovery in theory, resulting in reduced confidentiality of the confirmation token.",
+      "threatSource": "remote attacker with a known week key",
+      "threatAction": "exploit non-constant-time token comparison as a timing side channel",
+      "threatImpact": "theoretical token recovery",
+      "impactedAssets": [
+        "confirmation token"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "I"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "4.4"
+        }
+      ],
+      "tags": [
+        "T08"
+      ]
+    },
+    {
+      "id": "e47dbc6f-0147-4fd8-a579-f90ecb8d3d4b",
+      "numericId": 9,
+      "displayOrder": 9,
+      "status": "threatIdentified",
+      "statement": "An in-account principal with sqs:ReceiveMessage on the DLQ that lacks explicit SSE-KMS can read retained failed-event payloads, which leads to disclosure of any tokens or keys present in failed events, resulting in reduced confidentiality of failed-event data in the dead letter queue.",
+      "threatSource": "in-account principal with SQS read",
+      "threatAction": "read unencrypted retained event payloads from the DLQ",
+      "threatImpact": "disclosure of tokens/keys in failed events",
+      "impactedAssets": [
+        "SQS DLQ messages"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "I"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "4.4"
+        }
+      ],
+      "tags": [
+        "T09"
+      ]
+    },
+    {
+      "id": "4232cd57-9d97-4043-b3a6-d7ccf51556e7",
+      "numericId": 10,
+      "displayOrder": 10,
+      "status": "threatIdentified",
+      "statement": "An in-account principal that can subscribe to the unencrypted SNS alerts topic can intercept operational alert messages containing the DynamoDB partition key, which leads to leakage of operational metadata, resulting in reduced confidentiality of operational status information.",
+      "threatSource": "in-account principal able to subscribe to SNS",
+      "threatAction": "intercept cleartext alert messages by subscribing to the unencrypted topic",
+      "threatImpact": "leakage of operational metadata",
+      "impactedAssets": [
+        "SNS alert messages",
+        "operational status"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "I",
+            "R"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "4.2"
+        }
+      ],
+      "tags": [
+        "T10"
+      ]
+    },
+    {
+      "id": "9360c686-5c9c-4956-87eb-7db963c865a5",
+      "numericId": 11,
+      "displayOrder": 11,
+      "status": "threatIdentified",
+      "statement": "A privileged insider that has write or policy access to the audit S3 bucket lacking public-access-block, versioning and object-lock can delete or tamper with CloudTrail logs, which leads to destruction of the audit trail, resulting in reduced integrity and availability of the DynamoDB access audit records.",
+      "threatSource": "privileged insider",
+      "threatAction": "delete or tamper with CloudTrail objects in an unhardened audit bucket",
+      "threatImpact": "audit trail destruction / anti-forensics",
+      "impactedAssets": [
+        "CloudTrail audit logs",
+        "S3 audit bucket"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "T",
+            "R",
+            "I"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "4.2"
+        }
+      ],
+      "tags": [
+        "T11"
+      ]
+    },
+    {
+      "id": "1623b562-2b34-4d87-a1a2-a1f6df718e78",
+      "numericId": 12,
+      "displayOrder": 12,
+      "status": "threatIdentified",
+      "statement": "A third-party attacker that exploits an unenforced DMARC policy on the sender domain can spoof reminder emails with a malicious confirmation link, which leads to phishing of the recipient, resulting in reduced integrity of trust in the reminder emails.",
+      "threatSource": "third-party spoofing attacker",
+      "threatAction": "spoof reminder emails using the sender domain absent enforced DMARC",
+      "threatImpact": "phishing of the recipient",
+      "impactedAssets": [
+        "sender domain trust",
+        "recipient"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "S"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "4.2"
+        }
+      ],
+      "tags": [
+        "T12"
+      ]
+    },
+    {
+      "id": "d8d37bc9-7334-41de-ac97-1eca54b8d122",
+      "numericId": 13,
+      "displayOrder": 13,
+      "status": "threatIdentified",
+      "statement": "A remote attacker that targets the CloudFront distribution lacking WAF and access logging can flood it at layer 7 with no edge mitigation or forensic record, which leads to degraded availability and reduced investigability, resulting in reduced availability and accountability of the edge tier.",
+      "threatSource": "remote attacker",
+      "threatAction": "flood the CloudFront edge that has no WAF or access logs",
+      "threatImpact": "degraded availability and lost edge forensics",
+      "impactedAssets": [
+        "CloudFront distribution"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "D",
+            "R",
+            "I"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "4.2"
+        }
+      ],
+      "tags": [
+        "T13"
+      ]
+    },
+    {
+      "id": "3de40b8b-d449-49d1-9092-7f8a16e56602",
+      "numericId": 14,
+      "displayOrder": 14,
+      "status": "threatIdentified",
+      "statement": "A malicious insider that holds ssm:GetParameter and kms:Decrypt on the aws/ssm managed key can read the SecureString recipient PII and Pushover credentials, which leads to disclosure of personal and credential data, resulting in reduced confidentiality of recipient PII and Pushover credentials.",
+      "threatSource": "malicious insider",
+      "threatAction": "read SecureString PII and credentials via SSM get-parameter with decryption",
+      "threatImpact": "disclosure of PII and credentials",
+      "impactedAssets": [
+        "recipient PII",
+        "Pushover credentials"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "I"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Medium"
+        },
+        {
+          "key": "DREAD",
+          "value": "4.2"
+        }
+      ],
+      "tags": [
+        "T14"
+      ]
+    },
+    {
+      "id": "cc7c4076-8288-42a7-b4ee-cd07117036a2",
+      "numericId": 15,
+      "displayOrder": 15,
+      "status": "threatIdentified",
+      "statement": "An operator or future input flow that places a crafted value into the animal variable can cause _fetch_animal_image to request an attacker-chosen host, which leads to server-side request forgery, resulting in reduced confidentiality and integrity of the Lambda's outbound requests.",
+      "threatSource": "operator or future tainted input source",
+      "threatAction": "inject a crafted animal value that controls the outbound image URL",
+      "threatImpact": "server-side request forgery to an arbitrary host",
+      "impactedAssets": [
+        "Lambda outbound egress"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "I",
+            "T"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Low"
+        },
+        {
+          "key": "DREAD",
+          "value": "3.4"
+        }
+      ],
+      "tags": [
+        "T15"
+      ]
+    },
+    {
+      "id": "96166ad4-8c46-425e-ad8e-2cb8804d274c",
+      "numericId": 16,
+      "displayOrder": 16,
+      "status": "threatIdentified",
+      "statement": "An attacker that has compromised the Lambda role or an insider with DynamoDB write can rewrite the status or token attributes of a reminder record, which leads to forged confirmations or broken links, resulting in reduced integrity of the reminder task state.",
+      "threatSource": "compromised role or insider with DynamoDB write",
+      "threatAction": "rewrite status or token attributes directly in DynamoDB",
+      "threatImpact": "forged confirmations or broken links",
+      "impactedAssets": [
+        "reminder task state"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "T"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Low"
+        },
+        {
+          "key": "DREAD",
+          "value": "3.4"
+        }
+      ],
+      "tags": [
+        "T16"
+      ]
+    },
+    {
+      "id": "1c2fcff8-ca44-442d-a5c0-3c9d4ce493b7",
+      "numericId": 17,
+      "displayOrder": 17,
+      "status": "threatIdentified",
+      "statement": "A recipient or link holder that confirms the task without any source IP or User-Agent being recorded can later deny the action, which leads to inability to attribute the confirmation, resulting in reduced accountability of the confirmation event.",
+      "threatSource": "recipient or link holder",
+      "threatAction": "confirm without attributable IP/User-Agent being logged",
+      "threatImpact": "inability to attribute the confirmation",
+      "impactedAssets": [
+        "confirmation audit record"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "R"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Low"
+        },
+        {
+          "key": "DREAD",
+          "value": "3.2"
+        }
+      ],
+      "tags": [
+        "T17"
+      ]
+    },
+    {
+      "id": "2ad87a63-22ac-43b3-9a40-f450f4390462",
+      "numericId": 18,
+      "displayOrder": 18,
+      "status": "threatIdentified",
+      "statement": "An insider with events:EnableRule or lambda:InvokeFunction that re-enables the disabled test rule or sends a test payload can drive high-frequency test cycles, which leads to notification spam and minor cost, resulting in reduced availability of the recipient's attention and cost integrity.",
+      "threatSource": "insider with EventBridge/Lambda permissions",
+      "threatAction": "re-enable the test rule or invoke handlers with a test payload",
+      "threatImpact": "notification spam and minor cost",
+      "impactedAssets": [
+        "recipient notifications",
+        "AWS bill"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "T",
+            "E"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Low"
+        },
+        {
+          "key": "DREAD",
+          "value": "3.0"
+        }
+      ],
+      "tags": [
+        "T18"
+      ]
+    },
+    {
+      "id": "ec9d01cf-9a97-4e15-a060-b8f2f1ef8822",
+      "numericId": 19,
+      "displayOrder": 19,
+      "status": "threatIdentified",
+      "statement": "An in-account principal with lambda:InvokeFunction that crafts a fake scheduled event can invoke the handlers outside their schedule, which leads to off-schedule execution mostly rejected by the DST guards, resulting in reduced integrity of the scheduled execution flow.",
+      "threatSource": "in-account principal with invoke permission",
+      "threatAction": "invoke handlers with forged scheduled-event payloads",
+      "threatImpact": "off-schedule execution attempts",
+      "impactedAssets": [
+        "scheduled Lambda handlers"
+      ],
+      "metadata": [
+        {
+          "key": "STRIDE",
+          "value": [
+            "S"
+          ]
+        },
+        {
+          "key": "Priority",
+          "value": "Low"
+        },
+        {
+          "key": "DREAD",
+          "value": "3.0"
+        }
+      ],
+      "tags": [
+        "T19"
+      ]
+    }
+  ]
+}
