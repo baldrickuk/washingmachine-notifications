@@ -24,22 +24,20 @@ resource "aws_dynamodb_table" "reminders" {
 # SSM Parameter Store (SecureString) — sensitive credentials
 # ---------------------------------------------------------------------------
 
-resource "aws_ssm_parameter" "twilio_auth_token" {
-  name  = "/${var.stack_name}/twilio_auth_token"
+resource "aws_ssm_parameter" "pushover_app_token" {
+  name  = "/${var.stack_name}/pushover_app_token"
   type  = "SecureString"
-  value = var.twilio_auth_token
+  value = var.pushover_app_token
 
   lifecycle {
     ignore_changes = [value]
   }
 }
 
-resource "aws_ssm_parameter" "whatsapp_access_token" {
-  count = var.whatsapp_access_token != "" ? 1 : 0
-
-  name  = "/${var.stack_name}/whatsapp_access_token"
+resource "aws_ssm_parameter" "pushover_user_key" {
+  name  = "/${var.stack_name}/pushover_user_key"
   type  = "SecureString"
-  value = var.whatsapp_access_token
+  value = var.pushover_user_key
 
   lifecycle {
     ignore_changes = [value]
