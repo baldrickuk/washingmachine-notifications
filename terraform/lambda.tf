@@ -92,15 +92,16 @@ resource "aws_lambda_function" "send_daily_sms" {
 # ---------------------------------------------------------------------------
 
 resource "aws_lambda_function" "confirm_task" {
-  function_name    = "${var.stack_name}-confirm-task"
-  role             = local.lambda_defaults.role
-  filename         = local.lambda_defaults.filename
-  source_code_hash = local.lambda_source_hash
-  runtime          = local.lambda_defaults.runtime
-  architectures    = local.lambda_defaults.architectures
-  memory_size      = local.lambda_defaults.memory_size
-  timeout          = 10 # Synchronous API call — tighter timeout
-  handler          = "app.confirm_task"
+  function_name                  = "${var.stack_name}-confirm-task"
+  role                           = local.lambda_defaults.role
+  filename                       = local.lambda_defaults.filename
+  source_code_hash               = local.lambda_source_hash
+  runtime                        = local.lambda_defaults.runtime
+  architectures                  = local.lambda_defaults.architectures
+  memory_size                    = local.lambda_defaults.memory_size
+  reserved_concurrent_executions = 5
+  timeout                        = 10 # Synchronous API call — tighter timeout
+  handler                        = "app.confirm_task"
 
   environment {
     variables = local.lambda_env
