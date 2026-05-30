@@ -525,11 +525,19 @@ class TestOriginVerify:
             result = app.confirm_task(self._event(), None)
         assert result["statusCode"] == 200
 
-    def test_test_mode_bypasses_check(self):
+    def test_test_mode_without_header_still_returns_403(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"):
+            result = app.confirm_task(self._event(test="1"), None)
+        assert result["statusCode"] == 403
+
+    def test_test_mode_with_correct_header_proceeds(self):
         with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
              patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"), \
              patch.object(app, "_notify_congratulations"):
-            result = app.confirm_task(self._event(test="1"), None)
+            result = app.confirm_task(
+                self._event(test="1", headers={"x-origin-verify": "correct-secret"}), None
+            )
         assert result["statusCode"] == 200
 
 

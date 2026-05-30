@@ -566,7 +566,7 @@ def confirm_task(event, _context):
     token = params.get("token")
     is_test = params.get("test") == "1"
 
-    if ORIGIN_VERIFY_ENABLED and not is_test:
+    if ORIGIN_VERIFY_ENABLED:
         presented = (event.get("headers") or {}).get("x-origin-verify", "")
         if not hmac.compare_digest(presented, ORIGIN_VERIFY_TOKEN):
             _log("Origin verify failed", level="WARNING")
