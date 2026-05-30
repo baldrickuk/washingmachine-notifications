@@ -121,13 +121,12 @@ def _notify_initial(confirm_url: str, is_test: bool):
         _send_pushover(
             message=(
                 "<b>The washing machine filter requires your attention.</b>\n\n"
-                "Tap below to confirm once done — or tomorrow begins "
+                "Tap to confirm once done — or tomorrow begins "
                 "<i>Day 1</i> of what will become an increasingly dramatic escalation sequence.\n\n"
+                f"<a href=\"{confirm_url}\"><b>✓ Done — confirm here</b></a>\n\n"
                 "<font color=\"#888888\">The filter is watching. It has all week.</font>"
             ),
             title=title,
-            url=confirm_url,
-            url_title="✓ Done — confirm here",
             html=True,
         )
     else:
