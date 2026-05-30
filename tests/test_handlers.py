@@ -418,8 +418,7 @@ class TestConfirmTask:
             "status": "PENDING", "token": "test-token", "sms_dates": [],
             "email_sent_at": sent_at.isoformat(),
         }}
-        with patch.object(app, "_now_london", return_value=confirmed_at), \
-             patch.object(app, "_notify_too_fast"):
+        with patch.object(app, "_now_london", return_value=confirmed_at):
             result = app.confirm_task(self._event(), None)
         assert result["statusCode"] == 200
         assert "All done" not in result["body"]
@@ -433,22 +432,9 @@ class TestConfirmTask:
             "email_sent_at": sent_at.isoformat(),
         }}
         app.table.update_item.reset_mock()
-        with patch.object(app, "_now_london", return_value=confirmed_at), \
-             patch.object(app, "_notify_too_fast"):
+        with patch.object(app, "_now_london", return_value=confirmed_at):
             app.confirm_task(self._event(), None)
         app.table.update_item.assert_not_called()
-
-    def test_too_fast_confirmation_calls_notify_too_fast(self):
-        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
-        confirmed_at = datetime(2026, 5, 17, 9, 1, 30, tzinfo=LONDON_TZ)  # 90s later
-        app.table.get_item.return_value = {"Item": {
-            "status": "PENDING", "token": "test-token", "sms_dates": [],
-            "email_sent_at": sent_at.isoformat(),
-        }}
-        with patch.object(app, "_now_london", return_value=confirmed_at), \
-             patch.object(app, "_notify_too_fast") as mock_too_fast:
-            app.confirm_task(self._event(), None)
-        mock_too_fast.assert_called_once()
 
     def test_exactly_120s_confirmation_proceeds_normally(self):
         sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
@@ -470,8 +456,7 @@ class TestConfirmTask:
             "status": "PENDING", "token": "test-token", "sms_dates": [],
             "email_sent_at": sent_at.isoformat(),
         }}
-        with patch.object(app, "_now_london", return_value=confirmed_at), \
-             patch.object(app, "_notify_too_fast"):
+        with patch.object(app, "_now_london", return_value=confirmed_at):
             result = app.confirm_task(self._event(test="1"), None)
         assert result["statusCode"] == 200
         assert "All done" not in result["body"]

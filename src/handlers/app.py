@@ -587,7 +587,6 @@ def confirm_task(event, _context):
         elapsed = (now - sent_at).total_seconds()
         if elapsed < 120:
             _log("Confirmation too fast", pk=pk, elapsed_seconds=int(elapsed), level="WARNING")
-            _notify_too_fast(int(elapsed))
             return _html_response(200, _too_fast_page(int(elapsed)))
 
     sms_count = len(item.get("sms_dates", []))
@@ -690,21 +689,6 @@ def _congratulations_html(commentary: str, caption: str, image_url: str, animal:
   </table>
 </body>
 </html>"""
-
-
-def _notify_too_fast(elapsed_seconds: int) -> None:
-    """Chastise the user for attempting to confirm without actually doing the job."""
-    _send_pushover(
-        message=(
-            f"<b>That was {elapsed_seconds} seconds.</b>\n\n"
-            "The filter has not been cleaned in that time. "
-            "It takes longer than that to find the washing machine.\n\n"
-            "<font color=\"#C0392B\">Go and do a proper job. "
-            "The link will still be there when you're done.</font>"
-        ),
-        title="🤨 Nice try.",
-        html=True,
-    )
 
 
 def _too_fast_page(elapsed_seconds: int) -> str:
