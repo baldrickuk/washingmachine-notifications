@@ -26,7 +26,7 @@ graph LR
 
     subgraph store ["  Storage  "]
         DB[("DynamoDB\n─────────────\nPK: WEEK#YYYY-MM-DD\nstatus · token\nsms_dates · ttl")]
-        SSM[("SSM Parameter Store\n─────────────\nSecureString\ntwilio_auth_token\nwife_email · wife_phone")]
+        SSM[("SSM Parameter Store\n─────────────\nSecureString\npushover_app_token\npushover_user_key · wife_email")]
     end
 
     subgraph ops ["  Observability & Audit  "]
@@ -43,10 +43,8 @@ graph LR
     end
 
     subgraph channel ["  Notification Channel  "]
-        SES["SES\nEmail\n(always)"]
-        TW["Twilio\nSMS\n(optional)"]
-        TWA["Twilio\nWhatsApp\n(optional)"]
-        WA["Meta Cloud API\nWhatsApp\n(optional)"]
+        SES["SES\nEmail\n(fallback)"]
+        PO["Pushover\nPush notification\n(primary)"]
     end
 
     subgraph human ["  Recipient  "]
@@ -65,18 +63,18 @@ graph LR
     L4 -.->|"alert if\nmissing"| STOPIC
     L1 -->|create record| DB
     L1 -->|send| SES
+    L1 -->|send| PO
     L2 -->|check & update| DB
-    L2 -->|send reminder| TW
-    L2 -->|send reminder| WA
+    L2 -->|send reminder| PO
     L3 -->|mark confirmed| DB
     L3 -->|send congratulations| SES
+    L3 -->|send congratulations| PO
 
     L1 & L2 -.->|"on failure\n(after retries)"| DLQ
     CW -->|"errors / DLQ depth\n/ 4xx throttle"| STOPIC
 
     SES --> EM
-    TW --> PH
-    WA --> PH
+    PO --> PH
     EM -->|"clicks link"| CF
     CF -->|"GB allowed\nothers → 403"| GW
     GW -->|"invoke\n(throttled)"| L3
@@ -94,8 +92,8 @@ graph LR
     class EB1,EB2,EB3,EB4 schedule
     class L1,L2,L3,L4 fn
     class DB storage
-    class SM secret
-    class SES,TW,WA messaging
+
+    class SES,PO messaging
     class CF edge
     class GW gateway
     class EM,PH person
@@ -111,7 +109,7 @@ graph LR
 | **EventBridge** | 7 scheduled rules (6 prod + 1 test) | Triggers all four Lambda functions on schedule |
 | **Lambda** × 4 | `SendWeeklyEmail`, `SendDailySMS`, `ConfirmTask`, `VerifyDelivery` | All business logic — arm64 Graviton2, 256 MB |
 | **DynamoDB** | Single table, PAY_PER_REQUEST | Tracks weekly task state (30-day TTL) |
-| **SSM Parameter Store** | 4 SecureString parameters | Stores Twilio/WhatsApp tokens and recipient PII (encrypted at rest with KMS) |
+| **SSM Parameter Store** | 4 SecureString parameters | Stores Pushover credentials and recipient PII (encrypted at rest with KMS) |
 | **SES** | Email via verified identity | Sends reminder and congratulations emails |
 | **CloudFront** | Distribution, `PriceClass_100`, GB whitelist | GB-only geo restriction at the CDN edge — non-GB requests never reach the origin |
 | **API Gateway** | HTTP API v2, `GET /confirm`, throttled 5 req/s | Confirmation link origin behind CloudFront |
@@ -126,7 +124,7 @@ graph LR
 
 ## Notification Channels
 
-The system supports four delivery channels, selected by configuration in priority order. Email is always available; the others are opt-in.
+The system uses a two-channel priority chain. Pushover is the primary channel when credentials are configured; SES email is always the fallback.
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': {'primaryColor': '#1e3a5f', 'primaryTextColor': '#c9d1d9', 'primaryBorderColor': '#4a7ab5', 'lineColor': '#58a6ff', 'edgeLabelBackground': '#0d1117'}}}%%
@@ -134,26 +132,27 @@ The system supports four delivery channels, selected by configuration in priorit
 flowchart LR
     DISPATCH["_notify_initial()\n_notify_reminder()\n_notify_congratulations()"]
 
-    DISPATCH -->|"WHATSAPP_PHONE_NUMBER_ID set\n(highest priority)"| WA["WhatsApp\nvia Meta Cloud API"]
-    DISPATCH -->|"TWILIO_WHATSAPP_ENABLED=true"| TWA["WhatsApp\nvia Twilio"]
-    DISPATCH -->|"default"| EMAIL["SES Email\n+ optional SMS nudge"]
+    DISPATCH -->|"PUSHOVER_ENABLED\n(pushover_app_token + pushover_user_key set)"| PO["Pushover\npush notification\n(priority 0 / 1 / 2)"]
+    DISPATCH -->|"fallback"| EMAIL["SES Email"]
 
-    EMAIL -->|"TWILIO_ENABLED=true"| TSMS["Twilio SMS"]
-    EMAIL -->|"TWILIO_ENABLED=false"| NOSMS["SMS skipped"]
-
-    style WA fill:#1a2a3a,stroke:#3a6a9a,color:#80b0d0
-    style TWA fill:#1a2a3a,stroke:#3a6a9a,color:#80b0d0
+    style PO    fill:#1a2a3a,stroke:#3a6a9a,color:#80b0d0
     style EMAIL fill:#1a3a1a,stroke:#3a7a3a,color:#80d080
-    style TSMS fill:#2a1a3a,stroke:#6a3a8a,color:#b070d0
-    style NOSMS fill:#2a2a2a,stroke:#555,color:#888
 ```
 
-| `WHATSAPP_*` set | `TWILIO_WHATSAPP_ENABLED` | `TWILIO_ENABLED` | Channel used |
-|:---:|:---:|:---:|---|
-| No | false | false | Email only (default) |
-| No | false | true | Email + Twilio SMS |
-| No | true | true | WhatsApp via Twilio |
-| Yes | — | — | WhatsApp via Meta Cloud API (no email) |
+`PUSHOVER_ENABLED` is derived in Python from `bool(PUSHOVER_APP_TOKEN and PUSHOVER_USER_KEY)` — no separate feature flag needed.
+
+| `pushover_app_token` set | `pushover_user_key` set | Channel used |
+|:---:|:---:|---|
+| No | No | SES Email only (default) |
+| Yes | Yes | Pushover (push notification) |
+
+**Reminder priority escalation** — `_notify_reminder` uses Pushover's priority field to bypass quiet hours and demand acknowledgement:
+
+| Reminder count | Pushover priority | Behaviour |
+|:---:|:---:|---|
+| 0–1 | 0 (normal) | Standard delivery |
+| 2–4 | 1 (high) | Bypasses device quiet hours |
+| 5+ | 2 (emergency) | Retries every 30 s until acknowledged |
 
 ---
 
@@ -169,7 +168,7 @@ sequenceDiagram
     participant L  as SendWeeklyEmail λ
     participant SSM as SSM Parameter Store
     participant DB as DynamoDB
-    participant CH as Channel (SES / WhatsApp)
+    participant CH as Channel (SES / Pushover)
     actor W  as Recipient
 
     EB->>L: Sunday 08:00 or 09:00 UTC
@@ -177,7 +176,7 @@ sequenceDiagram
 
     Note over L,SSM: Cold start only
     L->>SSM: GetParameter (with KMS decryption)
-    SSM-->>L: {twilio_auth_token, whatsapp_access_token, wife_email, wife_phone}
+    SSM-->>L: {pushover_app_token, pushover_user_key, wife_email, wife_phone}
 
     L->>L: Check actual London time == 09:xx
     Note over L: Exits if wrong hour (DST guard)
@@ -219,7 +218,7 @@ flowchart TD
     DEDUP -- Yes --> SKIP4(["⏭ Skip\nalready sent today"])
     DEDUP -- No --> PICK["Select escalating message\nby sms_dates length"]
 
-    PICK --> SEND["_notify_reminder()\n(Twilio SMS / WhatsApp / skipped)"]
+    PICK --> SEND["_notify_reminder()\n(Pushover push / WARNING log if disabled)"]
     SEND --> UPDATE["Append today to\nsms_dates in DynamoDB"]
     UPDATE --> DONE(["📨 Reminder delivered"])
 
@@ -248,7 +247,7 @@ sequenceDiagram
     participant GW as API Gateway<br/>(5 req/s throttle)
     participant L  as ConfirmTask λ
     participant DB as DynamoDB
-    participant CH as Channel (SES / WhatsApp)
+    participant CH as Channel (SES / Pushover)
 
     W->>CF: GET /confirm?week=2026-05-17&token=uuid
     alt Origin not GB
@@ -318,25 +317,24 @@ sequenceDiagram
     participant KMS as KMS (encryption)
     participant ENV as Environment Variables
 
-    L->>SSM: GetParameter(/stack-name/twilio_auth_token, WithDecryption=true)
+    L->>SSM: GetParameter(/stack-name/pushover_app_token, WithDecryption=true)
     SSM->>KMS: Decrypt
     KMS-->>SSM: Decrypted value
     SSM-->>L: Decrypted parameter value
-    
-    Note over L: Repeated for wife_email, wife_phone, whatsapp_access_token<br/>All cached in module-level _PARAMS dict
 
-    L->>ENV: Read non-sensitive config<br/>(FROM_EMAIL, TABLE_NAME, TWILIO_ACCOUNT_SID…)
+    Note over L: Repeated for pushover_user_key, wife_email, wife_phone<br/>All cached in module-level _PARAMS dict
+
+    L->>ENV: Read non-sensitive config<br/>(FROM_EMAIL, TABLE_NAME, ANIMAL_TYPE…)
     Note over L,ENV: Falls back to env vars if<br/>Parameter Store unavailable
 ```
 
 | Secret | Location | Visible in Lambda config? |
 |---|---|:---:|
-| `twilio_auth_token` | SSM Parameter Store (SecureString) | No |
-| `whatsapp_access_token` | SSM Parameter Store (SecureString) | No |
+| `pushover_app_token` | SSM Parameter Store (SecureString) | No |
+| `pushover_user_key` | SSM Parameter Store (SecureString) | No |
 | `wife_email` | SSM Parameter Store (SecureString) | No |
 | `wife_phone` | SSM Parameter Store (SecureString) | No |
 | `FROM_EMAIL` | Environment variable | Yes (sender address — not PII) |
-| `TWILIO_ACCOUNT_SID` | Environment variable | Yes (identifier, not credential) |
 
 ---
 
@@ -359,7 +357,7 @@ stateDiagram-v2
 
 ## Reminder Escalation Ladder
 
-Each day without confirmation triggers the next message in the sequence. From day 9 onwards the final message repeats. Works across all channels (email body, SMS, WhatsApp).
+Each day without confirmation triggers the next message in the sequence. From day 9 onwards the final message repeats. Works across both channels (Pushover push notification and SES email).
 
 | # | Tone | Opening |
 |---|---|---|
@@ -522,7 +520,7 @@ All AWS resources are managed with **Terraform / OpenTofu** in the `terraform/` 
 flowchart LR
     subgraph tf ["terraform/"]
         P["providers.tf\nAWS 5.x + null"]
-        V["variables.tf\n18 input variables"]
+        V["variables.tf\n9 input variables"]
         L["locals.tf\nShared env map · tags"]
         M["main.tf\nDynamoDB · SSM · SQS · SNS"]
         I["iam.tf\nRole + policy documents"]
@@ -576,10 +574,9 @@ tofu apply
    ```
 3. **SSM Parameter Store** — SecureString parameters populated automatically by `tofu apply` from `terraform.tfvars` values. Encryption uses AWS managed keys (no customer-managed KMS key required).
 
-**Optional channels:**
+**Notification channels:**
 
 | Channel | `terraform.tfvars` variables to set |
 |---|---|
-| Twilio SMS | `twilio_enabled = "true"`, `twilio_account_sid`, `twilio_auth_token`, `twilio_from_number` |
-| Twilio WhatsApp | All of the above + `twilio_whatsapp_enabled = "true"`, `twilio_whatsapp_from = "whatsapp:+<number>"` — enable WhatsApp on the Twilio number first |
-| WhatsApp via Meta | `whatsapp_phone_number_id`, `whatsapp_access_token`, create three approved Meta message templates |
+| **Pushover** *(primary)* | `pushover_app_token`, `pushover_user_key` — register at pushover.net, create a free application |
+| **SES Email** *(always on)* | No additional variables needed |

@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.12-3776ab?style=flat-square&logo=python&logoColor=white)
 ![OpenTofu](https://img.shields.io/badge/OpenTofu-1.7-FFDA18?style=flat-square&logo=opentofu&logoColor=black)
 ![Pylint](https://img.shields.io/badge/Pylint-10.00%2F10-4c1?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-42%20passing-4c1?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-58%20passing-4c1?style=flat-square)
 ![Well Architected](https://img.shields.io/badge/Well--Architected-5%2F5-0078d4?style=flat-square)
 ![Filter Status](https://img.shields.io/badge/Filter-Clean-brightgreen?style=flat-square)
 
@@ -28,7 +28,7 @@ Hope was not enough.
 
 Rather than have a single, normal conversation like a well-adjusted adult, I built a serverless AWS notification pipeline with:
 
-- **Automated weekly emails** with a confirmation link and an SMS nudge to actually open it
+- **Automated weekly emails** with a confirmation link and a Pushover push notification
 - **Daily escalating reminders** that grow progressively more unhinged if ignored
 - **A congratulations email** featuring a random animal photo upon confirmation
 - **AWS Systems Manager Parameter Store** — enterprise-grade secrets management, completely free
@@ -52,7 +52,7 @@ flowchart TD
     subgraph outbound ["📬  Outbound notifications"]
         direction LR
         EMAIL["📧 Email\nwith confirm link"]
-        SMS["📱 SMS nudge\n(Twilio — optional)"]
+        PUSH["🔔 Pushover\npush notification"]
     end
 
     subgraph escalation ["⚡  Daily 08:00 — while unconfirmed"]
@@ -75,11 +75,10 @@ flowchart TD
 
     REWARD["🎉 Congratulations email\n+ random animal photo"]
 
-    EB --> EMAIL & SMS
-    EMAIL & SMS -->|ignored| E1
+    EB --> EMAIL & PUSH
+    EMAIL & PUSH -->|ignored| E1
     EN -.->|still ignored\nrepeats| EN
-    EMAIL -->|clicks link| CF
-    EN -->|eventually clicks link| CF
+    EMAIL & PUSH -->|clicks link| CF
     CF -->|"non-GB → 403"| BLOCK(["🚫 Blocked"])
     CF -->|GB origin| GW --> DONE --> REWARD
 
@@ -153,7 +152,7 @@ cd washingmachine-notifications
 
 # Copy and fill in your values
 cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-# Edit terraform/terraform.tfvars — set wife_email, wife_phone, from_email, alert_email
+# Edit terraform/terraform.tfvars — set wife_email, wife_phone, from_email, alert_email, pushover_app_token, pushover_user_key
 
 # Build the Lambda package
 bash terraform/build.sh
@@ -174,13 +173,14 @@ That's it. The system will now operate autonomously every Sunday until the filte
      --use-case-description "Weekly household filter reminder to one recipient"
    ```
 
-### Optional channels
+### Pushover push notifications (primary channel)
 
-| Channel | Variables to set in `terraform.tfvars` |
+Set `pushover_app_token` and `pushover_user_key` in `terraform.tfvars` to enable push notifications via [Pushover](https://pushover.net). Create a free account and register an application to obtain both values. When configured, Pushover is used for all notifications; SES email is the fallback when Pushover is not configured.
+
+| Channel | Configuration |
 |---|---|
-| **Twilio SMS** | `twilio_enabled = "true"`, `twilio_account_sid`, `twilio_auth_token`, `twilio_from_number` |
-| **Twilio WhatsApp** | All of the above + `twilio_whatsapp_enabled = "true"`, `twilio_whatsapp_from = "whatsapp:+<number>"` — reuses Twilio credentials, no Meta account needed |
-| **WhatsApp via Meta** | `whatsapp_phone_number_id`, `whatsapp_access_token` — requires Meta WhatsApp Business account and three pre-approved message templates |
+| **Pushover** *(primary)* | `pushover_app_token`, `pushover_user_key` — create a free account at pushover.net |
+| **SES Email** *(fallback)* | Always available — no extra configuration needed |
 
 Credentials are stored in **AWS Systems Manager Parameter Store (SecureString)** automatically on deploy — never in Lambda environment variables. Encrypted at rest with AWS managed keys, completely within the free tier.
 
@@ -218,7 +218,7 @@ pip install -r tests/requirements.txt
 python -m pytest tests/ -v
 ```
 
-42 unit tests, 0.06s. No real AWS calls — fully mocked.
+58 unit tests, 0.06s. No real AWS calls — fully mocked.
 
 ---
 

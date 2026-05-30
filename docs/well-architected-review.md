@@ -17,7 +17,7 @@ flowchart LR
     subgraph t5 ["★★★★★  5 / 5 — All Pillars"]
         SEC["🔒 Security\n─────────────\nAll findings resolved\nCloudTrail DDB audit active"]
         COST["💰 Cost Optimization\n─────────────\nEffectively free\n~$0.00/month"]
-        OPS["⚙️ Operational Excellence\n─────────────\nStructured logs, 42 tests\nCI/CD pipeline live"]
+        OPS["⚙️ Operational Excellence\n─────────────\nStructured logs, 58 tests\nCI/CD pipeline live"]
         REL["🔄 Reliability\n─────────────\nDLQ, alarms, and\nMonday verify check"]
         PERF["⚡ Performance Efficiency\n─────────────\nGraviton2, 256MB memory\nAll findings resolved"]
         SUS["🌱 Sustainability\n─────────────\nGraviton2 active\nResource tagging resolved"]
@@ -82,7 +82,7 @@ flowchart LR
         F["CloudWatch alarms\n(errors, DLQ, throttling)"]
         G["Dead letter queue\n(SQS, 14-day retention)"]
         H["Structured JSON logging\n(_log function)"]
-        I["Automated tests & CI/CD\n(42 tests, GitHub Actions)"]
+        I["Automated tests & CI/CD\n(58 tests, GitHub Actions)"]
         J["CloudWatch dashboard\n(8-widget operational view)"]
     end
 ```
@@ -186,7 +186,7 @@ sequenceDiagram
 |---|---------|:----:|----------------|
 | PERF-1 | **Lambda on x86 architecture** — all three functions use x86 (default). ARM (Graviton2) delivers ~20% better price-performance | ✅ ~~Medium~~ | Resolved — `Architectures: [arm64]` added to Globals. All three functions now run on Graviton2. |
 | PERF-2 | **Lambda memory not tuned** — default 128MB used | ✅ ~~Medium~~ | Resolved — `MemorySize` set to 256MB globally. Provides proportionally more CPU for cold starts and HTTP I/O. Full power-tuning via AWS Lambda Power Tuning tool remains available for future optimisation. |
-| PERF-3 | **Twilio SDK loaded unconditionally** — `twilio` package always present in deployment zip, adding ~29 MB when unused | ✅ ~~Low~~ | Resolved — `build.sh` strips Lambda runtime packages (boto3, botocore, etc.) and only installs Twilio when `TWILIO_ENABLED=true`. Package size: 29 MB → 29 KB. |
+| PERF-3 | **Third-party notification SDK** — previously the Twilio SDK (~29 MB) was conditionally bundled; notification delivery is now handled via stdlib `urllib.request` | ✅ ~~Low~~ | Resolved — Twilio removed entirely. Pushover integration uses no external library. Lambda zip is stdlib-only (~29 KB). |
 | PERF-4 | **Global Lambda timeout of 30s** — all functions shared an unnecessarily permissive timeout | ✅ ~~Low~~ | Resolved — per-function timeouts: `SendWeeklyEmail` 30s, `SendDailySMS` 15s, `ConfirmTask` 10s, `VerifyDelivery` 15s. |
 
 ### Best Practices Met
@@ -267,10 +267,10 @@ All findings have been resolved and implemented as of May 2026. The system achie
 
 | Category | Findings | Status | Key Implementations |
 |---|---|---|---|
-| **Operational Excellence** | 6 | ✅ Resolved | CloudWatch alarms, SQS DLQ, structured JSON logging, 42 unit tests, GitHub Actions CI/CD, 8-widget dashboard |
+| **Operational Excellence** | 6 | ✅ Resolved | CloudWatch alarms, SQS DLQ, structured JSON logging, 58 unit tests, GitHub Actions CI/CD, 8-widget dashboard |
 | **Security** | 6 | ✅ Resolved | Secrets in SSM Parameter Store, API Gateway rate limiting (5 req/s), CloudFront GB geo-restriction, CloudTrail DynamoDB data events, scoped SES IAM |
 | **Reliability** | 4 | ✅ Resolved | SQS DLQ on async functions, CloudWatch alarms, Monday verification check (VerifyDelivery Lambda) |
-| **Performance Efficiency** | 4 | ✅ Resolved | ARM64 Graviton2 architecture, 256MB memory, per-function timeouts, conditional Twilio SDK loading |
+| **Performance Efficiency** | 4 | ✅ Resolved | ARM64 Graviton2 architecture, 256MB memory, per-function timeouts, stdlib-only notification delivery (no third-party SDK) |
 | **Cost Optimization** | 1 | ✅ Resolved | Migrated from Secrets Manager (~$0.40/month) to SSM Parameter Store SecureString (free tier) |
 | **Sustainability** | 2 | ✅ Resolved | ARM64 Graviton2 processors (60% more energy efficient), resource tagging via Terraform default_tags |
 
