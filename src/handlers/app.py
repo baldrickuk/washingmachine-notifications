@@ -1,4 +1,5 @@
 """Lambda handlers for the washing machine filter reminder system."""
+import hmac
 import json
 import os
 import urllib.error
@@ -567,7 +568,7 @@ def confirm_task(event, _context):
 
     if ORIGIN_VERIFY_ENABLED and not is_test:
         presented = (event.get("headers") or {}).get("x-origin-verify", "")
-        if presented != ORIGIN_VERIFY_TOKEN:
+        if not hmac.compare_digest(presented, ORIGIN_VERIFY_TOKEN):
             _log("Origin verify failed", level="WARNING")
             return _html_response(403, _error_page("Access denied."))
 
