@@ -264,6 +264,14 @@ resource "aws_s3_bucket" "trail" {
   bucket = "${var.stack_name}-audit-${data.aws_caller_identity.current.account_id}"
 }
 
+resource "aws_s3_bucket_public_access_block" "trail" {
+  bucket                  = aws_s3_bucket.trail.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "trail" {
   bucket = aws_s3_bucket.trail.id
 
@@ -312,9 +320,10 @@ resource "aws_s3_bucket_policy" "trail" {
 }
 
 resource "aws_cloudtrail" "app" {
-  name           = "${var.stack_name}-trail"
-  s3_bucket_name = aws_s3_bucket.trail.id
-  enable_logging = true
+  name                          = "${var.stack_name}-trail"
+  s3_bucket_name                = aws_s3_bucket.trail.id
+  enable_logging                = true
+  enable_log_file_validation    = true
 
   event_selector {
     read_write_type           = "All"

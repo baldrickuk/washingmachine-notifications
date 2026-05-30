@@ -1,4 +1,5 @@
 """Lambda handlers for the washing machine filter reminder system."""
+import hmac
 import json
 import os
 import urllib.error
@@ -28,6 +29,7 @@ def _load_parameters() -> dict:
     for env_key, param_name in [
         ("PARAM_PUSHOVER_APP_TOKEN", "pushover_app_token"),
         ("PARAM_PUSHOVER_USER_KEY", "pushover_user_key"),
+        ("PARAM_ORIGIN_VERIFY_TOKEN", "origin_verify_token"),
         ("PARAM_WIFE_EMAIL", "wife_email"),
         ("PARAM_WIFE_PHONE", "wife_phone"),
     ]:
@@ -49,6 +51,10 @@ WIFE_PHONE = _PARAMS.get("wife_phone") or os.environ.get("WIFE_PHONE", "")
 PUSHOVER_APP_TOKEN = _PARAMS.get("pushover_app_token", "")
 PUSHOVER_USER_KEY  = _PARAMS.get("pushover_user_key", "")
 PUSHOVER_ENABLED   = bool(PUSHOVER_APP_TOKEN and PUSHOVER_USER_KEY)
+
+# --- Origin verify (CloudFront shared secret — blocks direct execute-api access) ---
+ORIGIN_VERIFY_TOKEN   = _PARAMS.get("origin_verify_token", "")
+ORIGIN_VERIFY_ENABLED = bool(ORIGIN_VERIFY_TOKEN)
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
@@ -121,14 +127,12 @@ def _notify_initial(confirm_url: str, is_test: bool):
         _send_pushover(
             message=(
                 "<b>The washing machine filter requires your attention.</b>\n\n"
-                "Tap below to confirm once done — or tomorrow begins "
+                "Tap to confirm once done — or tomorrow begins "
                 "<i>Day 1</i> of what will become an increasingly dramatic escalation sequence.\n\n"
                 f"<a href=\"{confirm_url}\"><b>✓ Done — confirm here</b></a>\n\n"
                 "<font color=\"#888888\">The filter is watching. It has all week.</font>"
             ),
             title=title,
-            url=confirm_url,
-            url_title="✓ Done — confirm here",
             html=True,
         )
     else:
@@ -562,10 +566,19 @@ def confirm_task(event, _context):
     token = params.get("token")
     is_test = params.get("test") == "1"
 
+    if ORIGIN_VERIFY_ENABLED:
+        presented = (event.get("headers") or {}).get("x-origin-verify", "")
+        if not hmac.compare_digest(presented, ORIGIN_VERIFY_TOKEN):
+            _log("Origin verify failed", level="WARNING")
+            return _html_response(403, _error_page("Access denied."))
+
     if not week or not token:
         return _html_response(400, _error_page("Invalid confirmation link — missing parameters."))
 
-    pk = _week_pk(date.fromisoformat(week), is_test)
+    try:
+        pk = _week_pk(date.fromisoformat(week), is_test)
+    except ValueError:
+        return _html_response(400, _error_page("Invalid confirmation link — malformed date."))
     response = table.get_item(Key={"PK": pk})
 
     if "Item" not in response:
@@ -576,7 +589,7 @@ def confirm_task(event, _context):
     if item["status"] == "CONFIRMED":
         return _html_response(200, _already_confirmed_page())
 
-    if item["token"] != token:
+    if not hmac.compare_digest(item["token"], token):
         _log("Invalid token presented", pk=pk, level="WARNING")
         return _html_response(403, _error_page("Invalid confirmation token."))
 

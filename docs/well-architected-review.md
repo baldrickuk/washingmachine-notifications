@@ -2,8 +2,8 @@
 
 > *This review applies the AWS Well-Architected Framework to a system designed to remind one person to clean one filter once a week. The framework was built for enterprise workloads. We are using it anyway.*
 
-**Review date:** May 2026
-**Reviewer:** Claude (AI-assisted self-assessment)
+**Review date:** May 2026 (v1); re-reviewed 30 May 2026 (v2 — Stuart, independent pass)
+**Reviewer:** Claude (AI-assisted self-assessment); Stuart (independent second pass, 2026-05-30)
 **Workload risk profile:** Low — single household, non-critical, no SLA, no revenue dependency
 
 ---
@@ -306,4 +306,44 @@ flowchart LR
 
 ---
 
-*Review conducted against the AWS Well-Architected Framework (2024 edition). 18 of 18 findings resolved. Zero open items. The filter, for its part, has no architectural concerns — and neither does anyone else.*
+*Review conducted against the AWS Well-Architected Framework (2024 edition). 18 of 18 prior findings resolved.*
+
+---
+
+## Stuart's Independent Re-Review — 30 May 2026
+
+Stuart conducted a second independent pass after the Pushover integration and T01–T05 security hardening. 8 new findings identified (1 MEDIUM, 7 LOW). No regressions on previously resolved items.
+
+### New Findings
+
+| ID | Pillar | Rating | Finding |
+|----|--------|:------:|---------|
+| OE-7 | Operational Excellence | 🟢 LOW | Stale Twilio secret reference in commented CI/CD deploy job (`ci.yml:71,103`) |
+| OE-8 | Operational Excellence | 🟢 LOW | No `aws_cloudwatch_log_group` with explicit retention — Lambda logs accumulate forever |
+| OE-9 | Operational Excellence | 🟢 LOW | X-Ray tracing not enabled on any Lambda function |
+| SEC-7 | Security | 🟡 MEDIUM | `enable_log_file_validation` not set on `aws_cloudtrail.app` — log integrity unverifiable |
+| SEC-8 | Security | 🟢 LOW | S3 audit bucket has no `aws_s3_bucket_public_access_block` resource |
+| SEC-9 | Security | 🟢 LOW | S3 audit bucket has no versioning — deleted log objects are unrecoverable |
+| SEC-10 | Security | 🟢 LOW | `origin_verify_token` defaults to `""` — silently disables the CloudFront origin-verify security control on fresh deploys; no validation block |
+| REL-5 | Reliability | 🟢 LOW | `verify_delivery` Lambda has no `dead_letter_config` and no CloudWatch errors alarm |
+
+### Priority Fixes (< 1 hour total)
+
+1. **SEC-7** — Add `enable_log_file_validation = true` to `aws_cloudtrail.app` in `terraform/monitoring.tf`
+2. **REL-5** — Add `dead_letter_config { target_arn = aws_sqs_queue.dlq.arn }` to `aws_lambda_function.verify_delivery` + add CloudWatch errors alarm in `terraform/monitoring.tf`
+3. **SEC-10** — Add `validation { condition = length(var.origin_verify_token) >= 32 ... }` to `terraform/variables.tf`
+
+### Good Housekeeping (next deploy cycle)
+
+4. **OE-7** — Remove Twilio reference from `.github/workflows/ci.yml` commented deploy job; add Pushover/origin-verify vars
+5. **SEC-8 + SEC-9** — Add `aws_s3_bucket_public_access_block` and `aws_s3_bucket_versioning` for trail bucket in `terraform/monitoring.tf`
+6. **OE-8** — Add four `aws_cloudwatch_log_group` resources with `retention_in_days = 90`
+7. **OE-9** — Add `tracing_config { mode = "Active" }` to each Lambda function
+
+### Trade-off Notes (from Stuart)
+
+- No WAF, GuardDuty, or Security Hub — cost not justified for a single-purpose household account at this traffic volume; existing controls (CloudFront + X-Origin-Verify + throttle + UUID token + 2-min gate) are proportionate.
+- Single IAM role for all four Lambdas — complexity overhead of per-function roles outweighs the benefit at this scale; acceptable accepted risk.
+- No DynamoDB PITR — RPO is one week (one missed cycle); a `tofu apply` restores the table; cost not justified.
+
+*Stuart's second pass confirms 18 prior findings remain resolved. 8 new low-severity items identified, none representing immediate operational risk to the core mission.*

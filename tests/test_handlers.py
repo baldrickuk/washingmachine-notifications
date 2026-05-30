@@ -199,8 +199,8 @@ class TestNotifyDispatchersPushover:
             app._notify_initial("https://example.com/confirm?week=2026-05-17&token=abc", False)
         mock_push.assert_called_once()
         kwargs = mock_push.call_args.kwargs
-        assert kwargs["url"] == "https://example.com/confirm?week=2026-05-17&token=abc"
-        assert kwargs["url_title"] == "✓ Done — confirm here"
+        assert "https://example.com/confirm?week=2026-05-17&token=abc" in kwargs["message"]
+        assert "url" not in kwargs
 
     def test_notify_initial_calls_email_when_disabled(self):
         with patch.object(app, "PUSHOVER_ENABLED", False), \
@@ -371,6 +371,18 @@ class TestConfirmTask:
         result = app.confirm_task({}, None)
         assert result["statusCode"] == 400
 
+    def test_malformed_week_returns_400(self):
+        result = app.confirm_task(
+            {"queryStringParameters": {"week": "not-a-date", "token": "test-token"}}, None
+        )
+        assert result["statusCode"] == 400
+
+    def test_out_of_range_week_returns_400(self):
+        result = app.confirm_task(
+            {"queryStringParameters": {"week": "2026-13-99", "token": "test-token"}}, None
+        )
+        assert result["statusCode"] == 400
+
     def test_unknown_record_returns_404(self):
         app.table.get_item.return_value = {}
         result = app.confirm_task(self._event(), None)
@@ -383,6 +395,16 @@ class TestConfirmTask:
         result = app.confirm_task(self._event(), None)
         assert result["statusCode"] == 200
         assert "Already confirmed" in result["body"]
+
+    def test_token_comparison_is_timing_safe(self):
+        import hmac as _hmac
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": []
+        }}
+        with patch.object(app, "_notify_congratulations"), \
+             patch("hmac.compare_digest", wraps=_hmac.compare_digest) as mock_digest:
+            app.confirm_task(self._event(), None)
+        mock_digest.assert_called()
 
     def test_invalid_token_returns_403(self):
         app.table.get_item.return_value = {"Item": {
@@ -469,6 +491,64 @@ class TestConfirmTask:
             result = app.confirm_task(self._event(), None)
         assert result["statusCode"] == 200
         assert "All done" in result["body"]
+
+
+class TestOriginVerify:
+    def _event(self, week="2026-05-17", token="test-token", test="0", headers=None):
+        return {
+            "queryStringParameters": {"week": week, "token": token, "test": test},
+            "headers": headers or {},
+        }
+
+    def setup_method(self):
+        app.table.reset_mock()
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+        }}
+
+    def test_missing_header_returns_403_when_enabled(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 403
+
+    def test_wrong_header_returns_403(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"):
+            result = app.confirm_task(
+                self._event(headers={"x-origin-verify": "wrong-secret"}), None
+            )
+        assert result["statusCode"] == 403
+
+    def test_correct_header_proceeds(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(
+                self._event(headers={"x-origin-verify": "correct-secret"}), None
+            )
+        assert result["statusCode"] == 200
+
+    def test_disabled_skips_check(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", False), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 200
+
+    def test_test_mode_without_header_still_returns_403(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"):
+            result = app.confirm_task(self._event(test="1"), None)
+        assert result["statusCode"] == 403
+
+    def test_test_mode_with_correct_header_proceeds(self):
+        with patch.object(app, "ORIGIN_VERIFY_ENABLED", True), \
+             patch.object(app, "ORIGIN_VERIFY_TOKEN", "correct-secret"), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(
+                self._event(test="1", headers={"x-origin-verify": "correct-secret"}), None
+            )
+        assert result["statusCode"] == 200
 
 
 class TestVerifyDelivery:

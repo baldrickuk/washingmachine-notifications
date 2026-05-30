@@ -1,6 +1,12 @@
 resource "aws_apigatewayv2_api" "confirm" {
-  name          = "${var.stack_name}-confirm-api"
-  protocol_type = "HTTP"
+  name                         = "${var.stack_name}-confirm-api"
+  protocol_type                = "HTTP"
+  disable_execute_api_endpoint = true
+}
+
+resource "aws_cloudwatch_log_group" "api_access" {
+  name              = "/aws/apigateway/${var.stack_name}"
+  retention_in_days = 30
 }
 
 resource "aws_apigatewayv2_stage" "default" {
@@ -11,6 +17,19 @@ resource "aws_apigatewayv2_stage" "default" {
   default_route_settings {
     throttling_rate_limit  = 5
     throttling_burst_limit = 10
+  }
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_access.arn
+    format = jsonencode({
+      requestId    = "$context.requestId"
+      ip           = "$context.identity.sourceIp"
+      requestTime  = "$context.requestTime"
+      httpMethod   = "$context.httpMethod"
+      routeKey     = "$context.routeKey"
+      status       = "$context.status"
+      errorMessage = "$context.error.message"
+    })
   }
 }
 

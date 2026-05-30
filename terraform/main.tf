@@ -1,5 +1,9 @@
 data "aws_caller_identity" "current" {}
 
+data "aws_kms_key" "ssm" {
+  key_id = "alias/aws/ssm"
+}
+
 # ---------------------------------------------------------------------------
 # DynamoDB
 # ---------------------------------------------------------------------------
@@ -38,6 +42,18 @@ resource "aws_ssm_parameter" "pushover_user_key" {
   name  = "/${var.stack_name}/pushover_user_key"
   type  = "SecureString"
   value = var.pushover_user_key
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "origin_verify_token" {
+  count = var.origin_verify_token != "" ? 1 : 0
+
+  name  = "/${var.stack_name}/origin_verify_token"
+  type  = "SecureString"
+  value = var.origin_verify_token
 
   lifecycle {
     ignore_changes = [value]

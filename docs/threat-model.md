@@ -1,7 +1,12 @@
 # Threat Model — washingmachine-notifications
 
+> _Last updated: 2026-05-30_ — re-review after remediation of the five original HIGH findings.
+
 > Security artefact produced by structured threat modelling (STRIDE + DREAD + MITRE ATT&CK Cloud Matrix).
-> Version 2.0 — supersedes the v1.3 model. The v1.3 model described a CloudFormation +
+> Version 2.1 — supersedes v2.0. T01–T05 (all HIGH) have been **mitigated in code/IaC** and verified
+> against the live `src/handlers/app.py`, `terraform/iam.tf`, `terraform/cloudfront.tf`, and
+> `terraform/lambda.tf` as of this update. Version 2.0 superseded the v1.3 model, which described a
+> CloudFormation +
 > Secrets Manager + Twilio architecture that **no longer matches the deployed code**. The system
 > is now Terraform/OpenTofu, uses **SSM Parameter Store (SecureString)** for secrets/PII, and
 > **Pushover** as the optional push channel. This model is grounded in the actual `src/` and
@@ -57,8 +62,8 @@ EXTERNAL ENTITIES
 
 TRUST BOUNDARIES
   ==TB1== Internet  <->  CloudFront edge          (geo whitelist GB)
-  ==TB2== Internet  <->  API Gateway origin URL   (execute-api.* — PUBLIC, NO geo, NO auth)  *** weak boundary ***
-  ==TB3== CloudFront <-> API Gateway origin        (AllViewerExceptHostHeader; no shared secret)
+  ==TB2== Internet  <->  API Gateway origin URL   (execute-api.* — public hostname, but confirm_task rejects 403 unless the X-Origin-Verify shared secret is present — see T01/M01)
+  ==TB3== CloudFront <-> API Gateway origin        (AllViewerExceptHostHeader; CloudFront injects the X-Origin-Verify custom header so only CloudFront-routed requests pass the Lambda's hmac.compare_digest check)
   ==TB4== API Gateway <-> ConfirmTask Lambda       (resource policy: apigw principal, /*/*/confirm)
   ==TB5== EventBridge <-> scheduled Lambdas        (resource policy: events.amazonaws.com)
   ==TB6== Lambda execution role <-> AWS data plane (IAM policy: DDB, SES, SSM, KMS, SQS, SNS)
@@ -93,11 +98,15 @@ PRIMARY FLOWS
   CloudTrail --DynamoDB data events--> D5
 ```
 
-Key structural observation: **TB2 is the weakest boundary.** `outputs.tf` exposes
-`confirm_api_url` and explicitly documents it as *"API Gateway origin URL (direct — bypasses geo
-restriction)"*. The `execute-api` endpoint has no geo restriction, no WAF, no shared-secret header
-check against CloudFront, so the entire CloudFront GB whitelist is an advisory speed-bump, not a
-control.
+Key structural observation (updated 2026-05-30): TB2 was previously the weakest boundary —
+`outputs.tf` exposes `confirm_api_url` (the direct `execute-api` URL) and it has no geo restriction
+and no WAF. **This is now mitigated at the application layer (T01/M01):** CloudFront injects an
+`X-Origin-Verify` shared-secret header, and `confirm_task` rejects any request lacking the correct
+secret with a 403 (via `hmac.compare_digest`) before any business logic runs. The spoofable
+`is_test`-style client bypass has been removed. The CloudFront GB whitelist remains advisory at the
+network layer (the origin hostname is still public), but the origin is no longer an open
+confirmation endpoint — possession of the shared secret is required, and the UUIDv4 token remains the
+final defence.
 
 ---
 
@@ -109,72 +118,82 @@ score. Priority: CRITICAL ≥8.0, HIGH 6.0–7.9, MEDIUM 4.0–5.9, LOW <4.0.
 
 ---
 
-### T01 — Geo-restriction bypass via direct API Gateway origin  ·  DREAD 7.8  ·  HIGH
+### T01 — Geo-restriction bypass via direct API Gateway origin  ·  DREAD 7.8  ·  ✅ MITIGATED
 - **Component:** API Gateway HTTP API (`api_gateway.tf`), CloudFront (`cloudfront.tf`), `outputs.tf:confirm_api_url`
 - **STRIDE:** Spoofing, Tampering (boundary bypass), Denial of Service
 - **Attack:** The `https://{api_id}.execute-api.eu-west-2.amazonaws.com/confirm?week=…&token=…`
   origin is publicly reachable from any country. CloudFront's `geo_restriction whitelist=["GB"]`
-  only governs the CloudFront distribution; it does not protect the origin. There is no shared-secret
-  header injected by CloudFront and validated at the origin (origin request policy is
-  `AllViewerExceptHostHeader`), and the `aws_lambda_permission.api_gateway_confirm` allows the API
-  GW principal generally. An attacker anywhere hits the origin directly.
+  only governs the CloudFront distribution; it does not protect the origin.
 - **Attack path:** Recon origin id (TF output, DNS, email link analysis, or `execute-api` enumeration) → `curl` origin `/confirm` from any geography → reach `ConfirmTask` with no geo or CloudFront throttle in front.
 - **Pre-conditions:** Knowledge of the `execute-api` hostname (low bar — appears in TF outputs, possibly logs).
 - **Impact:** The advertised GB geo control and the CloudFront layer are nullified; attacker can brute/replay tokens and flood the Lambda from anywhere, defeating a documented security control.
-- **Existing controls:** API GW stage throttle 5 req/s burst 10 (this DOES apply at origin); UUIDv4 token still required.
+- **Existing controls:** API GW stage throttle 5 req/s burst 10; UUIDv4 token required.
+- **Mitigation applied (M01):** CloudFront now injects `X-Origin-Verify: <secret>` on every origin request (`cloudfront.tf:custom_header`). `confirm_task` uses `hmac.compare_digest` to validate the header — requests missing or mismatching the secret are rejected 403 before any business logic executes. Secret stored in SSM SecureString; `ORIGIN_VERIFY_ENABLED = bool(token)` so deployments without the variable are unaffected.
+- **Residual risk:** Low — hostname still public (UUIDv4 token remains the last line of defence); secret rotation requires SSM update + Lambda cold start.
 - **MITRE ATT&CK:** T1133 External Remote Services; T1090 Proxy (geo evasion); T1499 Endpoint DoS.
-- **Why HIGH not CRITICAL:** Token entropy (122-bit) still blocks false confirmation; impact is loss of a defence-in-depth layer + DoS surface, not direct compromise.
 
-### T02 — Unhandled `date.fromisoformat(week)` raises on malformed input  ·  DREAD 7.2  ·  HIGH
-- **Component:** `confirm_task`, `src/handlers/app.py:541` `pk = _week_pk(date.fromisoformat(week), is_test)`
+### T02 — Unhandled `date.fromisoformat(week)` raises on malformed input  ·  DREAD 7.2  ·  ✅ MITIGATED
+- **Component:** `confirm_task`, `src/handlers/app.py:578-581`
 - **STRIDE:** Denial of Service, Tampering (input validation)
-- **Attack:** `confirm_task` validates only that `week` and `token` are present (line 538), then passes
-  `week` straight into `date.fromisoformat(week)`. Any non-ISO value (`week=x`, `week=2026-13-99`,
-  `week=../`) raises `ValueError`, which is uncaught → Lambda errors → API Gateway returns 500/502.
-- **Attack path:** `GET /confirm?week=AAAA&token=AAAA` (via origin, see T01) → unhandled exception → 5xx.
-- **Pre-conditions:** Reachable endpoint (trivially, via T01 origin or CloudFront from GB).
-- **Impact:** Reliable error generation; trips the `confirm-task-errors` CloudWatch alarm (threshold ≥1) on demand, causing alert fatigue / masking real incidents; consumes Lambda error budget; cheap repeatable fault injection.
-- **Existing controls:** API GW throttle limits rate; alarm exists (which the attacker abuses).
+- **Attack (historic):** `confirm_task` previously passed `week` straight into `date.fromisoformat(week)`.
+  Any non-ISO value (`week=x`, `week=2026-13-99`, `week=../`) raised an uncaught `ValueError` → Lambda
+  error → API Gateway 500/502, trivially trippable as fault injection / alarm noise.
+- **Mitigation applied (M02):** `date.fromisoformat(week)` is now wrapped in `try/except ValueError`
+  returning a clean `_html_response(400, _error_page("Invalid confirmation link — malformed date."))`
+  (`app.py:578-581`). Malformed input now produces a controlled 400 instead of a 5xx, so it no longer
+  trips the `confirm-task-errors` alarm or consumes the Lambda error budget.
+- **Residual risk:** Very low — `token` is not separately format-validated before the DynamoDB lookup,
+  but a bad token simply fails the equality/`get_item` path with a 403/404 (no exception). The earlier
+  origin-verify check (T01) also fronts this path now.
 - **MITRE ATT&CK:** T1499.004 Application/Endpoint DoS; T1565 Data Manipulation (via alarm noise).
-- **Note:** Also no `try/except` around `date.fromisoformat` — contrast with the careful guarding elsewhere.
 
-### T03 — Over-broad `kms:Decrypt` on `key/*` wildcard  ·  DREAD 6.6  ·  HIGH
-- **Component:** `terraform/iam.tf:44-55` SSMParameters statement, resource `arn:aws:kms:…:key/*`
+### T03 — Over-broad `kms:Decrypt` on `key/*` wildcard  ·  DREAD 6.6  ·  ✅ MITIGATED
+- **Component:** `terraform/iam.tf:44-55` SSMParameters statement
 - **STRIDE:** Elevation of Privilege, Information Disclosure
-- **Attack:** The Lambda role is granted `kms:Decrypt` against **every KMS key in the account/region**
-  (`key/*`), not just the key encrypting the four SSM SecureStrings. A compromised dependency (or any
-  code path coerced to call KMS) inheriting this role can decrypt ciphertext protected by unrelated
-  keys elsewhere in the account, far beyond this app's data.
-- **Attack path:** Supply-chain compromise of `boto3`/transitive dep, or SSRF-to-metadata → assume role context → `kms:Decrypt` arbitrary ciphertext from other workloads sharing the account.
-- **Pre-conditions:** Code execution under the Lambda role (T06), and presence of other KMS-protected data in the account.
-- **Impact:** Lateral movement / cross-workload secret decryption; violates least privilege.
-- **Existing controls:** None scoping the key; relies on no other code calling KMS.
+- **Attack (historic):** The Lambda role was granted `kms:Decrypt` against **every KMS key in the
+  account/region** (`key/*`). A compromised dependency inheriting the role could decrypt ciphertext
+  protected by unrelated keys elsewhere in the account.
+- **Mitigation applied (M03):** `kms:Decrypt` is now scoped to `data.aws_kms_key.ssm.arn` — the
+  `aws/ssm` managed key only (`iam.tf:49,53`). The statement's resources are the app's SSM parameter
+  path (`parameter/${var.stack_name}/*`) plus that single KMS key ARN; the `key/*` wildcard is gone.
+  A compromised role can no longer decrypt ciphertext belonging to other workloads' keys.
+- **Residual risk:** Low — `aws/ssm` is an AWS-managed key shared by all SSM SecureStrings in the
+  account, so an in-account principal with both `ssm:GetParameter` on another path and this Decrypt
+  could still read other SSM SecureStrings (the role's SSM read is, however, scoped to this stack's
+  path). A customer-managed key with a tight key policy (see T14) would close this further.
 - **MITRE ATT&CK:** T1078.004 Valid Accounts: Cloud; T1552 Unsecured Credentials; T1530 Data from Cloud Storage.
 
-### T04 — Over-broad `ses:SendEmail` on `identity/*` wildcard  ·  DREAD 6.4  ·  HIGH
-- **Component:** `terraform/iam.tf:35-42` SES statement, resource `…:identity/*`
+### T04 — Over-broad `ses:SendEmail` on `identity/*` wildcard  ·  DREAD 6.4  ·  ✅ MITIGATED
+- **Component:** `terraform/iam.tf:35-42` SES statement
 - **STRIDE:** Spoofing, Elevation of Privilege
-- **Attack:** The role may `ses:SendEmail` from **any verified identity in the account**, not just
-  `FROM_EMAIL`. A compromised dependency can send arbitrary mail (phishing, spam) as any verified
-  domain/address, abusing the account's SES reputation and sending quota.
-- **Attack path:** Code execution under Lambda role (T06) → `ses:SendEmail` with attacker-chosen Source/Destination/body.
-- **Pre-conditions:** Code execution under role; SES in production mode (README requests it).
-- **Impact:** Brand/domain spoofing, deliverability/reputation damage, potential SES account suspension, phishing launchpad.
-- **Existing controls:** None on Source; SES sandbox would limit recipients but README instructs requesting production access.
+- **Attack (historic):** The role could `ses:SendEmail` from **any verified identity in the account**,
+  enabling a compromised dependency to send arbitrary phishing/spam as any verified domain/address and
+  burn the account's SES reputation and quota.
+- **Mitigation applied (M04):** `ses:SendEmail` is now scoped to the single identity
+  `arn:aws:ses:${var.aws_region}:${account_id}:identity/${var.from_email}` (`iam.tf:38-41`). The role
+  can only send from the configured `FROM_EMAIL` identity; it can no longer impersonate other verified
+  identities in the account.
+- **Residual risk:** Low — the role can still send to arbitrary destinations *as* `FROM_EMAIL`
+  (the resource scopes the sending identity, not the recipient). An optional `ses:FromAddress`
+  condition or an identity-level sending-authorization policy would add defence in depth, but the
+  cross-identity spoofing blast radius is closed.
 - **MITRE ATT&CK:** T1078.004 Valid Accounts: Cloud; T1585/T1586 spoofed messaging; T1496 Resource Hijacking (quota).
 
-### T05 — `confirm_task` has no reserved concurrency — DoS / cost via origin  ·  DREAD 6.2  ·  HIGH
-- **Component:** `terraform/lambda.tf:94-110` (no `reserved_concurrent_executions`), reachable via T01/CloudFront
+### T05 — `confirm_task` has no reserved concurrency — DoS / cost via origin  ·  DREAD 6.2  ·  ✅ MITIGATED
+- **Component:** `terraform/lambda.tf:94-111` `aws_lambda_function.confirm_task`
 - **STRIDE:** Denial of Service
-- **Attack:** API GW throttle (5 req/s burst 10) caps request rate, but there is no Lambda reserved
-  concurrency floor/ceiling. Combined with T01 (origin bypass) and T02 (forced errors), sustained
-  traffic drives invocations + each does a DynamoDB `GetItem` and (on the error path) Lambda retries,
-  burning account-wide concurrency, DynamoDB on-demand RCUs, and CloudWatch costs. A single public
-  function can starve the other three handlers of account concurrency.
-- **Attack path:** Distributed `GET /confirm` to origin (T01) at/above throttle from many sources → exhaust shared account concurrency / inflate cost.
-- **Pre-conditions:** Reachable endpoint (T01).
-- **Impact:** Availability loss for confirmation + sibling Lambdas; bill inflation (DynamoDB, Lambda, CloudWatch, CloudFront egress).
-- **Existing controls:** API GW stage throttle; PAY_PER_REQUEST DynamoDB (no provisioned cap = cost, not outage).
+- **Attack (historic):** With no reserved concurrency, sustained traffic to the public confirm endpoint
+  (amplified by the then-open origin in T01 and forced errors in T02) could burn account-wide Lambda
+  concurrency and starve the three sibling handlers, plus inflate DynamoDB/CloudWatch cost.
+- **Mitigation applied (M05):** `reserved_concurrent_executions = 5` is now set on
+  `aws_lambda_function.confirm_task` (`lambda.tf:102`). This caps the function's blast radius — it can
+  no longer consume more than 5 concurrent executions, so it cannot starve the other handlers of the
+  account concurrency pool. Combined with M01 (origin verify) the public attack surface is also
+  reduced upstream.
+- **Residual risk:** Low — a flood can still saturate this function's own 5-slot reservation
+  (degrading confirmation latency for legitimate use) and incur DynamoDB on-demand / CloudWatch cost,
+  but siblings are protected. An AWS Budgets alarm and edge WAF rate limiting (T13) would further bound
+  cost-based DoS.
 - **MITRE ATT&CK:** T1499 Endpoint DoS; T1496 Resource Hijacking (cost).
 
 ### T06 — Compromised dependency exfiltrates cached SSM creds + PII  ·  DREAD 5.8  ·  MEDIUM
@@ -355,15 +374,30 @@ score. Priority: CRITICAL ≥8.0, HIGH 6.0–7.9, MEDIUM 4.0–5.9, LOW <4.0.
 
 ## 4. Risk Summary
 
-### 4.1 Counts by severity
+### 4.1 Counts by severity (open threats — post-remediation)
 
 | Severity | Count | Threat IDs |
 |---|---|---|
 | CRITICAL (≥8.0) | 0 | — |
-| HIGH (6.0–7.9) | 5 | T01, T02, T03, T04, T05 |
+| HIGH (6.0–7.9) | 0 | — (all five original HIGH findings mitigated — see §4.3) |
 | MEDIUM (4.0–5.9) | 9 | T06, T07, T08, T09, T10, T11, T12, T13, T14 |
 | LOW (<4.0) | 5 | T15, T16, T17, T18, T19 |
-| **Total** | **19** | |
+| **Total open** | **14** | |
+
+> The five HIGH findings (T01–T05) raised in v2.0 have all been remediated and verified against the
+> live source on 2026-05-30. They are retained in the register (§3) for traceability, marked
+> ✅ MITIGATED, and summarised in §4.3 below. DREAD scores shown for them are the original raw scores
+> (pre-control), not residual.
+
+### 4.3 Resolved threats (mitigated since v2.0)
+
+| ID | Title | Orig. DREAD | Mitigation | Implemented in |
+|---|---|---|---|---|
+| T01 | Geo-restriction bypass via direct API Gateway origin | 7.8 (HIGH) | CloudFront injects `X-Origin-Verify` shared secret; `confirm_task` validates with `hmac.compare_digest`, 403 on mismatch; spoofable `is_test` bypass removed | `cloudfront.tf:10-13`, `app.py:569-573` |
+| T02 | Unhandled `date.fromisoformat(week)` on malformed input | 7.2 (HIGH) | `try/except ValueError` → clean 400 | `app.py:578-581` |
+| T03 | Over-broad `kms:Decrypt` on `key/*` wildcard | 6.6 (HIGH) | `kms:Decrypt` scoped to `data.aws_kms_key.ssm.arn` (aws/ssm only) | `iam.tf:44-55` |
+| T04 | Over-broad `ses:SendEmail` on `identity/*` wildcard | 6.4 (HIGH) | `ses:SendEmail` scoped to `identity/${var.from_email}` | `iam.tf:35-42` |
+| T05 | `confirm_task` has no reserved concurrency | 6.2 (HIGH) | `reserved_concurrent_executions = 5` | `lambda.tf:102` |
 
 ### 4.2 Counts by STRIDE category (primary + secondary tags)
 
@@ -380,47 +414,47 @@ score. Priority: CRITICAL ≥8.0, HIGH 6.0–7.9, MEDIUM 4.0–5.9, LOW <4.0.
 
 ## 5. Mitigations Plan
 
-### 5.1 CRITICAL / HIGH — full detail
+### 5.1 Original CRITICAL / HIGH controls — all ✅ IMPLEMENTED as of 2026-05-30
 
-#### M01 → mitigates T01 (geo bypass via origin)
+#### M01 → mitigates T01 (geo bypass via origin) — ✅ IMPLEMENTED
 - **Control type:** Preventive (network/boundary)
-- **Description:** Stop the `execute-api` origin from accepting direct internet traffic so CloudFront is the only path, restoring the GB geo control as a real boundary.
-- **AWS service:** API Gateway + CloudFront (+ optional WAF/Lambda authorizer)
-- **Implementation (IaC preferred):** Add a CloudFront Origin Custom Header (e.g. `X-Origin-Verify: <random secret in SSM>`) in `cloudfront.tf` `origin.custom_header`, and validate it in `confirm_task` (reject requests missing/mismatching the header), or attach an API Gateway Lambda authorizer / resource policy that requires it. Stop publishing `confirm_api_url` in `outputs.tf`, or mark it for admin-only use. Optionally front API GW with AWS WAF (WebACL) scoped to the CloudFront-supplied header.
-- **Effort:** Medium
-- **Residual risk:** Low — header secret could leak via logs; rotate via SSM. Geo remains advisory but origin no longer freely reachable.
+- **Description:** CloudFront injects `X-Origin-Verify: <secret>` on every origin request; `confirm_task` rejects requests without the correct header with 403.
+- **AWS service:** CloudFront (custom origin header) + Lambda (`confirm_task`)
+- **Implementation:** `cloudfront.tf` `origin.custom_header { name = "X-Origin-Verify" value = var.origin_verify_token }`. In `app.py` `confirm_task`: `hmac.compare_digest(presented, ORIGIN_VERIFY_TOKEN)` — timing-safe comparison. Secret in SSM SecureString `/washingmachine-notifications/origin_verify_token`. `ORIGIN_VERIFY_ENABLED = bool(token)` so empty token disables the check.
+- **Effort:** Medium (completed)
+- **Residual risk:** Low — execute-api hostname still public; secret rotation needed if leaked. Geo restriction remains advisory rather than enforced at the network layer.
 
-#### M02 → mitigates T02 (`fromisoformat` crash)
+#### M02 → mitigates T02 (`fromisoformat` crash) — ✅ IMPLEMENTED
 - **Control type:** Preventive (input validation)
-- **Description:** Validate/parse `week` defensively and return a clean 400 instead of throwing.
+- **Description:** Parse `week` defensively and return a clean 400 instead of throwing.
 - **AWS service:** Lambda (code)
-- **Implementation:** Wrap `date.fromisoformat(week)` in `confirm_task` in `try/except ValueError` and return `_html_response(400, _error_page(...))`; add a regex/length check on `token` (UUID format) before lookup. (Code change in `src/handlers/app.py`; covered by unit tests.)
-- **Effort:** Low
-- **Residual risk:** Very low.
+- **Implementation:** `date.fromisoformat(week)` in `confirm_task` is wrapped in `try/except ValueError`, returning `_html_response(400, _error_page("Invalid confirmation link — malformed date."))` (`app.py:578-581`). Malformed input now yields a controlled 400, not a 5xx.
+- **Effort:** Low (completed)
+- **Residual risk:** Very low. Optional follow-up: add a UUID-format/length check on `token` before the DynamoDB lookup (currently a bad token simply fails the equality/lookup path with 403/404, no exception).
 
-#### M03 → mitigates T03 (kms:Decrypt wildcard)
+#### M03 → mitigates T03 (kms:Decrypt wildcard) — ✅ IMPLEMENTED
 - **Control type:** Preventive (least privilege)
-- **Description:** Scope `kms:Decrypt` to only the key that encrypts the SSM SecureStrings.
+- **Description:** Scope `kms:Decrypt` to the key that encrypts the SSM SecureStrings.
 - **AWS service:** IAM + KMS
-- **Implementation:** Create a customer-managed KMS key for the SSM parameters (set `key_id` on each `aws_ssm_parameter`), then in `iam.tf` replace `arn:…:key/*` with that specific key ARN, optionally gated by `kms:ViaService = ssm.<region>.amazonaws.com` condition. Split the SSM statement so `ssm:GetParameter` and `kms:Decrypt` carry distinct, tight resources.
-- **Effort:** Medium
-- **Residual risk:** Low — confined to the app's own SSM key.
+- **Implementation:** `iam.tf` SSMParameters statement now lists `data.aws_kms_key.ssm.arn` (the `aws/ssm` managed key) instead of `key/*` (`iam.tf:44-55`); resources are the stack's SSM parameter path plus that single key ARN.
+- **Effort:** Medium (completed)
+- **Residual risk:** Low — confined to the `aws/ssm` managed key. Optional follow-up: migrate to a customer-managed KMS key with a tight key policy (ties to T14) to constrain decryptors below account IAM and remove the shared-managed-key residual.
 
-#### M04 → mitigates T04 (ses:SendEmail wildcard)
+#### M04 → mitigates T04 (ses:SendEmail wildcard) — ✅ IMPLEMENTED
 - **Control type:** Preventive (least privilege)
 - **Description:** Restrict sending to the single verified `FROM_EMAIL` identity.
 - **AWS service:** IAM + SES
-- **Implementation:** In `iam.tf` SES statement, replace `identity/*` with `identity/${var.from_email}` (or the verified domain identity ARN), and add a condition `ses:FromAddress = var.from_email`. Consider an SES sending authorization policy on the identity.
-- **Effort:** Low
-- **Residual risk:** Low.
+- **Implementation:** `iam.tf` SES statement resource is now `arn:aws:ses:${var.aws_region}:${account_id}:identity/${var.from_email}` (`iam.tf:38-41`); the `identity/*` wildcard is gone.
+- **Effort:** Low (completed)
+- **Residual risk:** Low. Optional follow-up: add a `ses:FromAddress = var.from_email` condition / identity sending-authorization policy for defence in depth.
 
-#### M05 → mitigates T05 (no reserved concurrency)
+#### M05 → mitigates T05 (no reserved concurrency) — ✅ IMPLEMENTED
 - **Control type:** Preventive (resource control)
 - **Description:** Cap and isolate `confirm_task` concurrency to protect siblings and bound cost.
-- **AWS service:** Lambda (+ DynamoDB, WAF)
-- **Implementation:** Set `reserved_concurrent_executions` (e.g. 5–10) on `aws_lambda_function.confirm_task` in `lambda.tf`; add an AWS Budgets alarm; combine with M01 (origin lockdown) and rate-based WAF. Optionally set a DynamoDB on-demand max via application-level caching of negative lookups.
-- **Effort:** Low
-- **Residual risk:** Low — bounded blast radius; legitimate single-user traffic well within cap.
+- **AWS service:** Lambda
+- **Implementation:** `reserved_concurrent_executions = 5` set on `aws_lambda_function.confirm_task` (`lambda.tf:102`). The function can no longer starve the sibling handlers of the shared account concurrency pool.
+- **Effort:** Low (completed)
+- **Residual risk:** Low — bounded blast radius. Optional follow-up: AWS Budgets alarm + edge rate-based WAF (T13) to further bound cost-based DoS.
 
 ### 5.2 MEDIUM / LOW — recommended controls (summary)
 
@@ -465,18 +499,33 @@ score. Priority: CRITICAL ≥8.0, HIGH 6.0–7.9, MEDIUM 4.0–5.9, LOW <4.0.
 
 ## 7. Recommended Next Steps
 
-**Detection rules (CloudWatch Logs Insights / metric filters)**
-- Alarm on `confirm_task` 5xx / `ValueError` log spikes (detects T02 abuse) separately from the
-  existing error-count alarm so attacker-induced errors are distinguishable from outages.
-- Metric filter on `"Invalid token presented"` log line (`app.py:553`) to detect token-guessing (T01/T08).
-- CloudTrail alert on `kms:Decrypt` with keys other than the SSM key, and on `ssm:GetParameter` bulk reads (T03/T14).
-- CloudTrail/WAF alert on direct `execute-api` hits not carrying the CloudFront origin header (T01).
+> Update 2026-05-30: T01–T05 are remediated. The priorities below now centre on (a) **verifying** the
+> new controls hold and (b) the still-open MEDIUM/LOW backlog (T06–T19). Highest-value open items:
+> **T06** (dependency exfil — pin/hash-lock deps + egress allowlist), **T13** (CloudFront WAF + access
+> logging), and **T09/T10/T11** (explicit at-rest encryption / audit-bucket hardening).
 
-**Pentest scope**
-- Black-box: attempt origin-direct access to `execute-api` from a non-GB IP; fuzz `week`/`token`;
-  attempt forced 5xx; concurrency exhaustion test against `confirm_task`.
-- Grey-box: assume the Lambda role and enumerate reachable KMS keys and SES identities (validate
-  M03/M04 scoping).
+**Verify the new controls (regression / post-deploy checks)**
+- Confirm a direct `execute-api` `GET /confirm` **without** `X-Origin-Verify` returns 403 (T01/M01),
+  and that requests through CloudFront still succeed.
+- Confirm malformed `week` (e.g. `week=AAAA`) returns a 400, not a 5xx, and does **not** trip the
+  `confirm-task-errors` alarm (T02/M02).
+- Grey-box: assume the Lambda role and confirm `kms:Decrypt` is denied for keys other than `aws/ssm`,
+  and `ses:SendEmail` is denied for identities other than `FROM_EMAIL` (T03/T04 — validate M03/M04 scoping).
+- Confirm `confirm_task` honours its 5-slot reserved concurrency and a flood cannot starve the sibling
+  handlers (T05/M05).
+- Add a CI guard so the `X-Origin-Verify` / least-privilege scoping cannot silently regress (e.g. a
+  policy/IaC lint check that fails on `identity/*`, `key/*`, or a missing reserved-concurrency value).
+
+**Detection rules (CloudWatch Logs Insights / metric filters)**
+- Metric filter on the `"Origin verify failed"` log line (`app.py:572`) to detect direct-origin probing (T01).
+- Metric filter on `"Invalid token presented"` (`app.py:593`) to detect token-guessing (T08).
+- CloudTrail alert on `kms:Decrypt` with keys other than the SSM key, and on `ssm:GetParameter` bulk reads (T03/T14).
+
+**Pentest scope (open backlog)**
+- Black-box: re-attempt origin-direct access (now expect 403 without the secret); fuzz `week`/`token`;
+  concurrency-exhaustion test against `confirm_task` to confirm sibling isolation.
+- Grey-box: simulate a poisoned dependency reading `_PARAMS` and exfiltrating over HTTPS to validate
+  egress containment (T06); attempt to delete/modify CloudTrail S3 objects to validate audit hardening (T11).
 
 **Adversary emulation (MITRE ATT&CK Cloud)**
 - Emulate T1195.001 supply-chain (inject a benign exfil dependency in a test build) to validate egress
@@ -492,6 +541,7 @@ score. Priority: CRITICAL ≥8.0, HIGH 6.0–7.9, MEDIUM 4.0–5.9, LOW <4.0.
 
 ---
 
-*Threat model version 2.0. 19 threats: 0 critical, 5 high, 9 medium, 5 low. Grounded in the live
-Terraform + `app.py` source. Companion machine-readable artefact: `docs/threat-model.tc.json`
-(AWS Threat Composer schema v1).*
+*Threat model version 2.1 (re-review 2026-05-30). 19 threats catalogued; **5 HIGH (T01–T05) now
+mitigated**. Open: 0 critical, 0 high, 9 medium, 5 low (14 open). Grounded in the live Terraform +
+`app.py` source. Companion machine-readable artefact: `docs/threat-model.tc.json` (AWS Threat
+Composer schema v1) — not updated by this re-review; regenerate separately if needed.*

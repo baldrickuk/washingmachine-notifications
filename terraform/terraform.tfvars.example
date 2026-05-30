@@ -15,3 +15,7 @@ animal_type = "bunny"
 # Pushover credentials (https://pushover.net — create an application to get app token)
 pushover_app_token = "your_app_token_here"
 pushover_user_key  = "your_user_key_here"
+
+# Origin verify token — shared secret between CloudFront and Lambda
+# Generate with: python3 -c "import secrets; print(secrets.token_hex(32))"
+origin_verify_token = "your_generated_hex_secret_here"

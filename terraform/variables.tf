@@ -55,3 +55,10 @@ variable "pushover_user_key" {
   type        = string
   sensitive   = true
 }
+
+variable "origin_verify_token" {
+  description = "Shared secret injected by CloudFront as X-Origin-Verify header; blocks direct execute-api access"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

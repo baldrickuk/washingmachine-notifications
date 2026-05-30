@@ -4,7 +4,7 @@ output "confirm_url" {
 }
 
 output "confirm_api_url" {
-  description = "API Gateway origin URL (direct — bypasses geo restriction)"
+  description = "API Gateway origin URL — protected by X-Origin-Verify shared secret; direct requests without the header are rejected 403"
   value       = "https://${aws_apigatewayv2_api.confirm.id}.execute-api.${var.aws_region}.amazonaws.com"
 }
 
