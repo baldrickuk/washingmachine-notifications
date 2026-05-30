@@ -2,6 +2,7 @@
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, date, timedelta
@@ -25,8 +26,8 @@ def _load_parameters() -> dict:
     client = boto3.client("ssm")
     params = {}
     for env_key, param_name in [
-        ("PARAM_TWILIO_AUTH_TOKEN", "twilio_auth_token"),
-        ("PARAM_WHATSAPP_ACCESS_TOKEN", "whatsapp_access_token"),
+        ("PARAM_PUSHOVER_APP_TOKEN", "pushover_app_token"),
+        ("PARAM_PUSHOVER_USER_KEY", "pushover_user_key"),
         ("PARAM_WIFE_EMAIL", "wife_email"),
         ("PARAM_WIFE_PHONE", "wife_phone"),
     ]:
@@ -44,29 +45,10 @@ _PARAMS = _load_parameters()
 WIFE_EMAIL = _PARAMS.get("wife_email") or os.environ.get("WIFE_EMAIL", "")
 WIFE_PHONE = _PARAMS.get("wife_phone") or os.environ.get("WIFE_PHONE", "")
 
-# --- Twilio (optional SMS provider) ---
-_TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-_TWILIO_TOKEN = _PARAMS.get("twilio_auth_token") or os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER", "")
-TWILIO_ENABLED = os.environ.get("TWILIO_ENABLED", "false").lower() == "true"
-TWILIO_WHATSAPP_ENABLED = os.environ.get("TWILIO_WHATSAPP_ENABLED", "false").lower() == "true"
-TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_FROM", "")
-
-if TWILIO_ENABLED:
-    from twilio.rest import Client as TwilioClient  # pylint: disable=import-error
-    _TWILIO_CLIENT = TwilioClient(_TWILIO_SID, _TWILIO_TOKEN)
-else:
-    _TWILIO_CLIENT = None
-
-# --- WhatsApp via Meta Cloud API (optional, replaces email + SMS when enabled) ---
-WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
-WHATSAPP_ACCESS_TOKEN = (
-    _PARAMS.get("whatsapp_access_token") or os.environ.get("WHATSAPP_ACCESS_TOKEN", "")
-)
-WHATSAPP_REMINDER_TEMPLATE = os.environ.get("WHATSAPP_REMINDER_TEMPLATE", "filter_reminder")
-WHATSAPP_ESCALATION_TEMPLATE = os.environ.get("WHATSAPP_ESCALATION_TEMPLATE", "filter_escalation")
-WHATSAPP_CONGRATS_TEMPLATE = os.environ.get("WHATSAPP_CONGRATS_TEMPLATE", "filter_confirmed")
-WHATSAPP_ENABLED = bool(WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN)
+# --- Pushover (optional push notification provider) ---
+PUSHOVER_APP_TOKEN = _PARAMS.get("pushover_app_token", "")
+PUSHOVER_USER_KEY  = _PARAMS.get("pushover_user_key", "")
+PUSHOVER_ENABLED   = bool(PUSHOVER_APP_TOKEN and PUSHOVER_USER_KEY)
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
@@ -84,113 +66,98 @@ def _log(message: str, level: str = "INFO", **context) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pushover push notifications
+# ---------------------------------------------------------------------------
+
+def _send_pushover(
+    message: str,
+    title: str,
+    url: str = None,
+    url_title: str = None,
+    priority: int = 0,
+) -> None:
+    """POST a push notification to the Pushover API."""
+    if not PUSHOVER_ENABLED:
+        _log("Pushover skipped", reason="not configured")
+        return
+    payload = {
+        "token": PUSHOVER_APP_TOKEN,
+        "user": PUSHOVER_USER_KEY,
+        "message": message,
+        "title": title,
+        "priority": priority,
+    }
+    if url:
+        payload["url"] = url
+    if url_title:
+        payload["url_title"] = url_title
+    if priority == 2:
+        payload["retry"] = 30
+        payload["expire"] = 3600
+    data = urllib.parse.urlencode(payload).encode()
+    req = urllib.request.Request(
+        "https://api.pushover.net/1/messages.json",
+        data=data,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            _log("Pushover sent", title=title, priority=priority, status=str(r.status))
+    except (urllib.error.URLError, OSError) as exc:
+        _log("Pushover send failed", error=str(exc), level="WARNING")
+
+
+# ---------------------------------------------------------------------------
 # Channel-agnostic notification dispatchers
 # ---------------------------------------------------------------------------
 
 def _notify_initial(confirm_url: str, is_test: bool):
     """Send the initial weekly reminder via the configured channel."""
-    if WHATSAPP_ENABLED:
+    if PUSHOVER_ENABLED:
         prefix = "[TEST] " if is_test else ""
-        _send_whatsapp(WHATSAPP_REMINDER_TEMPLATE, [
-            f"{prefix}It's time to clean the washing machine filter! "
-            f"Tap here to confirm once done: {confirm_url}",
-        ])
-    elif TWILIO_WHATSAPP_ENABLED:
-        _send_whatsapp_twilio(
-            f"It's time to clean the washing machine filter! Confirm here: {confirm_url}",
-            is_test,
+        _send_pushover(
+            message=f"{prefix}It's time to clean the washing machine filter!",
+            title="Washing Machine Filter Reminder",
+            url=confirm_url,
+            url_title="Confirm filter cleaned ✓",
         )
     else:
         _send_email(confirm_url, is_test)
-        _send_nudge_sms(is_test)
 
 
 def _notify_reminder(sms_count: int, sunday: date):
     """Send an escalating reminder via the configured channel."""
-    if WHATSAPP_ENABLED:
-        _send_whatsapp(WHATSAPP_ESCALATION_TEMPLATE, [_escalating_sms(sms_count, sunday)])
-    elif TWILIO_WHATSAPP_ENABLED:
-        _send_whatsapp_twilio(_escalating_sms(sms_count, sunday))
+    if PUSHOVER_ENABLED:
+        if sms_count <= 1:
+            priority = 0
+        elif sms_count <= 4:
+            priority = 1
+        else:
+            priority = 2
+        _send_pushover(
+            message=_escalating_sms(sms_count, sunday),
+            title="Washing Machine Filter Reminder",
+            priority=priority,
+        )
     else:
-        _send_sms(_escalating_sms(sms_count, sunday))
+        _log("Reminder skipped", reason="Pushover not configured", level="WARNING")
 
 
 def _notify_congratulations(sms_count: int, animal: str):
     """Send a congratulations message via the configured channel."""
-    if WHATSAPP_ENABLED:
-        image_url = _fetch_animal_image(animal)
-        body = (
-            f"🎉 {_sms_commentary(sms_count)}\n\n"
-            f"As your reward, please enjoy this {animal}:\n{image_url}"
-            if image_url
-            else f"🎉 {_sms_commentary(sms_count)}"
-        )
-        _send_whatsapp(WHATSAPP_CONGRATS_TEMPLATE, [body])
-    elif TWILIO_WHATSAPP_ENABLED:
+    if PUSHOVER_ENABLED:
         image_url = _fetch_animal_image(animal)
         body = (
             f"🎉 {_sms_commentary(sms_count)}\n\nAs your reward: {image_url}"
             if image_url
             else f"🎉 {_sms_commentary(sms_count)}"
         )
-        _send_whatsapp_twilio(body)
+        _send_pushover(
+            message=body,
+            title="Filter cleaned! 🎉",
+        )
     else:
         _send_congratulations_email(sms_count, animal)
-
-
-# ---------------------------------------------------------------------------
-# WhatsApp — Meta Cloud API
-# ---------------------------------------------------------------------------
-
-def _send_whatsapp(template_name: str, body_params: list):
-    """Send a WhatsApp template message via the Meta Cloud API."""
-    payload = json.dumps({
-        "messaging_product": "whatsapp",
-        "to": WIFE_PHONE.lstrip("+"),
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {"code": "en_GB"},
-            "components": [{
-                "type": "body",
-                "parameters": [{"type": "text", "text": p} for p in body_params],
-            }],
-        },
-    }).encode()
-
-    req = urllib.request.Request(
-        f"https://graph.facebook.com/v20.0/{WHATSAPP_PHONE_NUMBER_ID}/messages",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=10) as r:
-        _log("WhatsApp sent", template=template_name, response=r.read().decode())
-
-
-# ---------------------------------------------------------------------------
-# SMS (Twilio only — opt-in)
-# ---------------------------------------------------------------------------
-
-def _send_sms(body: str):
-    if not TWILIO_ENABLED:
-        _log("SMS skipped", reason="Twilio not configured")
-        return
-    _TWILIO_CLIENT.messages.create(to=WIFE_PHONE, from_=TWILIO_FROM_NUMBER, body=body)
-    _log("SMS sent", provider="Twilio")
-
-
-def _send_whatsapp_twilio(message: str, is_test: bool = False):
-    if not _TWILIO_CLIENT or not TWILIO_WHATSAPP_FROM or not WIFE_PHONE:
-        _log("Twilio WhatsApp skipped", reason="not configured")
-        return
-    prefix = "[TEST] " if is_test else ""
-    to = f"whatsapp:{WIFE_PHONE}"
-    _TWILIO_CLIENT.messages.create(body=f"{prefix}{message}", from_=TWILIO_WHATSAPP_FROM, to=to)
-    _log("Twilio WhatsApp sent", to=to, test=is_test)
 
 
 def _now_london() -> datetime:
@@ -205,19 +172,6 @@ def _this_weeks_sunday(reference: datetime) -> date:
 def _week_pk(sunday: date, test: bool = False) -> str:
     prefix = "TEST" if test else "WEEK"
     return f"{prefix}#{sunday.isoformat()}"
-
-
-# ---------------------------------------------------------------------------
-# Initial SMS nudge — used in email+SMS mode only
-# ---------------------------------------------------------------------------
-
-def _send_nudge_sms(is_test: bool = False):
-    prefix = "[TEST] " if is_test else ""
-    _send_sms(
-        f"{prefix}📧 You've got mail! No, really — check your inbox. "
-        "There's an important message in there about a filter that has feelings "
-        "and would very much like to be cleaned. It's Sunday. You know what that means."
-    )
 
 
 # ---------------------------------------------------------------------------
