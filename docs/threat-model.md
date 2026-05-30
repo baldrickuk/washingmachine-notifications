@@ -57,8 +57,8 @@ EXTERNAL ENTITIES
 
 TRUST BOUNDARIES
   ==TB1== Internet  <->  CloudFront edge          (geo whitelist GB)
-  ==TB2== Internet  <->  API Gateway origin URL   (execute-api.* — PUBLIC, NO geo, NO auth)  *** weak boundary ***
-  ==TB3== CloudFront <-> API Gateway origin        (AllViewerExceptHostHeader; no shared secret)
+  ==TB2== Internet  <->  API Gateway origin URL   (execute-api.* — public hostname; X-Origin-Verify secret required)
+  ==TB3== CloudFront <-> API Gateway origin        (AllViewerExceptHostHeader + X-Origin-Verify custom header injected)
   ==TB4== API Gateway <-> ConfirmTask Lambda       (resource policy: apigw principal, /*/*/confirm)
   ==TB5== EventBridge <-> scheduled Lambdas        (resource policy: events.amazonaws.com)
   ==TB6== Lambda execution role <-> AWS data plane (IAM policy: DDB, SES, SSM, KMS, SQS, SNS)
@@ -109,21 +109,19 @@ score. Priority: CRITICAL ≥8.0, HIGH 6.0–7.9, MEDIUM 4.0–5.9, LOW <4.0.
 
 ---
 
-### T01 — Geo-restriction bypass via direct API Gateway origin  ·  DREAD 7.8  ·  HIGH
+### T01 — Geo-restriction bypass via direct API Gateway origin  ·  DREAD 7.8  ·  ✅ MITIGATED
 - **Component:** API Gateway HTTP API (`api_gateway.tf`), CloudFront (`cloudfront.tf`), `outputs.tf:confirm_api_url`
 - **STRIDE:** Spoofing, Tampering (boundary bypass), Denial of Service
 - **Attack:** The `https://{api_id}.execute-api.eu-west-2.amazonaws.com/confirm?week=…&token=…`
   origin is publicly reachable from any country. CloudFront's `geo_restriction whitelist=["GB"]`
-  only governs the CloudFront distribution; it does not protect the origin. There is no shared-secret
-  header injected by CloudFront and validated at the origin (origin request policy is
-  `AllViewerExceptHostHeader`), and the `aws_lambda_permission.api_gateway_confirm` allows the API
-  GW principal generally. An attacker anywhere hits the origin directly.
+  only governs the CloudFront distribution; it does not protect the origin.
 - **Attack path:** Recon origin id (TF output, DNS, email link analysis, or `execute-api` enumeration) → `curl` origin `/confirm` from any geography → reach `ConfirmTask` with no geo or CloudFront throttle in front.
 - **Pre-conditions:** Knowledge of the `execute-api` hostname (low bar — appears in TF outputs, possibly logs).
 - **Impact:** The advertised GB geo control and the CloudFront layer are nullified; attacker can brute/replay tokens and flood the Lambda from anywhere, defeating a documented security control.
-- **Existing controls:** API GW stage throttle 5 req/s burst 10 (this DOES apply at origin); UUIDv4 token still required.
+- **Existing controls:** API GW stage throttle 5 req/s burst 10; UUIDv4 token required.
+- **Mitigation applied (M01):** CloudFront now injects `X-Origin-Verify: <secret>` on every origin request (`cloudfront.tf:custom_header`). `confirm_task` uses `hmac.compare_digest` to validate the header — requests missing or mismatching the secret are rejected 403 before any business logic executes. Secret stored in SSM SecureString; `ORIGIN_VERIFY_ENABLED = bool(token)` so deployments without the variable are unaffected.
+- **Residual risk:** Low — hostname still public (UUIDv4 token remains the last line of defence); secret rotation requires SSM update + Lambda cold start.
 - **MITRE ATT&CK:** T1133 External Remote Services; T1090 Proxy (geo evasion); T1499 Endpoint DoS.
-- **Why HIGH not CRITICAL:** Token entropy (122-bit) still blocks false confirmation; impact is loss of a defence-in-depth layer + DoS surface, not direct compromise.
 
 ### T02 — Unhandled `date.fromisoformat(week)` raises on malformed input  ·  DREAD 7.2  ·  HIGH
 - **Component:** `confirm_task`, `src/handlers/app.py:541` `pk = _week_pk(date.fromisoformat(week), is_test)`
@@ -382,13 +380,13 @@ score. Priority: CRITICAL ≥8.0, HIGH 6.0–7.9, MEDIUM 4.0–5.9, LOW <4.0.
 
 ### 5.1 CRITICAL / HIGH — full detail
 
-#### M01 → mitigates T01 (geo bypass via origin)
+#### M01 → mitigates T01 (geo bypass via origin) — ✅ IMPLEMENTED
 - **Control type:** Preventive (network/boundary)
-- **Description:** Stop the `execute-api` origin from accepting direct internet traffic so CloudFront is the only path, restoring the GB geo control as a real boundary.
-- **AWS service:** API Gateway + CloudFront (+ optional WAF/Lambda authorizer)
-- **Implementation (IaC preferred):** Add a CloudFront Origin Custom Header (e.g. `X-Origin-Verify: <random secret in SSM>`) in `cloudfront.tf` `origin.custom_header`, and validate it in `confirm_task` (reject requests missing/mismatching the header), or attach an API Gateway Lambda authorizer / resource policy that requires it. Stop publishing `confirm_api_url` in `outputs.tf`, or mark it for admin-only use. Optionally front API GW with AWS WAF (WebACL) scoped to the CloudFront-supplied header.
-- **Effort:** Medium
-- **Residual risk:** Low — header secret could leak via logs; rotate via SSM. Geo remains advisory but origin no longer freely reachable.
+- **Description:** CloudFront injects `X-Origin-Verify: <secret>` on every origin request; `confirm_task` rejects requests without the correct header with 403.
+- **AWS service:** CloudFront (custom origin header) + Lambda (`confirm_task`)
+- **Implementation:** `cloudfront.tf` `origin.custom_header { name = "X-Origin-Verify" value = var.origin_verify_token }`. In `app.py` `confirm_task`: `hmac.compare_digest(presented, ORIGIN_VERIFY_TOKEN)` — timing-safe comparison. Secret in SSM SecureString `/washingmachine-notifications/origin_verify_token`. `ORIGIN_VERIFY_ENABLED = bool(token)` so empty token disables the check.
+- **Effort:** Medium (completed)
+- **Residual risk:** Low — execute-api hostname still public; secret rotation needed if leaked. Geo restriction remains advisory rather than enforced at the network layer.
 
 #### M02 → mitigates T02 (`fromisoformat` crash)
 - **Control type:** Preventive (input validation)
