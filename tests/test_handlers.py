@@ -411,6 +411,80 @@ class TestConfirmTask:
         call_kwargs = app.table.update_item.call_args[1]
         assert call_kwargs["ExpressionAttributeValues"][":status"] == "CONFIRMED"
 
+    def test_too_fast_confirmation_returns_cheeky_page(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 1, 30, tzinfo=LONDON_TZ)  # 90s later
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        with patch.object(app, "_now_london", return_value=confirmed_at), \
+             patch.object(app, "_notify_too_fast"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 200
+        assert "All done" not in result["body"]
+        assert "Already confirmed" not in result["body"]
+
+    def test_too_fast_confirmation_does_not_mark_confirmed(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 1, 30, tzinfo=LONDON_TZ)  # 90s later
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        app.table.update_item.reset_mock()
+        with patch.object(app, "_now_london", return_value=confirmed_at), \
+             patch.object(app, "_notify_too_fast"):
+            app.confirm_task(self._event(), None)
+        app.table.update_item.assert_not_called()
+
+    def test_too_fast_confirmation_calls_notify_too_fast(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 1, 30, tzinfo=LONDON_TZ)  # 90s later
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        with patch.object(app, "_now_london", return_value=confirmed_at), \
+             patch.object(app, "_notify_too_fast") as mock_too_fast:
+            app.confirm_task(self._event(), None)
+        mock_too_fast.assert_called_once()
+
+    def test_exactly_120s_confirmation_proceeds_normally(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 2, 0, tzinfo=LONDON_TZ)  # exactly 120s
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        with patch.object(app, "_now_london", return_value=confirmed_at), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 200
+        assert "All done" in result["body"]
+
+    def test_test_mode_bypasses_too_fast_check(self):
+        sent_at = datetime(2026, 5, 17, 9, 0, 0, tzinfo=LONDON_TZ)
+        confirmed_at = datetime(2026, 5, 17, 9, 0, 5, tzinfo=LONDON_TZ)  # 5s later
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+            "email_sent_at": sent_at.isoformat(),
+        }}
+        with patch.object(app, "_now_london", return_value=confirmed_at), \
+             patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(self._event(test="1"), None)
+        assert result["statusCode"] == 200
+        assert "All done" in result["body"]
+
+    def test_missing_email_sent_at_skips_timing_check(self):
+        app.table.get_item.return_value = {"Item": {
+            "status": "PENDING", "token": "test-token", "sms_dates": [],
+        }}
+        with patch.object(app, "_notify_congratulations"):
+            result = app.confirm_task(self._event(), None)
+        assert result["statusCode"] == 200
+        assert "All done" in result["body"]
+
 
 class TestVerifyDelivery:
     def setup_method(self):

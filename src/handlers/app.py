@@ -580,6 +580,17 @@ def confirm_task(event, _context):
         return _html_response(403, _error_page("Invalid confirmation token."))
 
     now = _now_london()
+
+    if not is_test:
+        email_sent_at_str = item.get("email_sent_at", "")
+        if email_sent_at_str:
+            sent_at = datetime.fromisoformat(email_sent_at_str)
+            elapsed = (now - sent_at).total_seconds()
+            if elapsed < 120:
+                _log("Confirmation too fast", pk=pk, elapsed_seconds=int(elapsed), level="WARNING")
+                _notify_too_fast(int(elapsed))
+                return _html_response(200, _too_fast_page(int(elapsed)))
+
     sms_count = len(item.get("sms_dates", []))
 
     table.update_item(
@@ -678,6 +689,43 @@ def _congratulations_html(commentary: str, caption: str, image_url: str, animal:
       </table>
     </td></tr>
   </table>
+</body>
+</html>"""
+
+
+def _notify_too_fast(elapsed_seconds: int) -> None:
+    """Chastise the user for attempting to confirm without actually doing the job."""
+    _send_pushover(
+        message=(
+            f"<b>That was {elapsed_seconds} seconds.</b>\n\n"
+            "The filter has not been cleaned in {elapsed_seconds} seconds. "
+            "It takes longer than that to find the washing machine.\n\n"
+            "<font color=\"#C0392B\">Go and do a proper job. "
+            "The link will still be there when you're done.</font>"
+        ).replace("{elapsed_seconds}", str(elapsed_seconds)),
+        title="🤨 Nice try.",
+        html=True,
+    )
+
+
+def _too_fast_page(elapsed_seconds: int) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nice try</title></head>
+<body style="margin:0;padding:40px 20px;font-family:Arial,sans-serif;text-align:center;background:#f5f5f5;">
+  <div style="max-width:400px;margin:0 auto;background:#fff;border-radius:8px;padding:40px;">
+    <div style="font-size:48px;">🤨</div>
+    <h2 style="color:#c62828;">Nice try.</h2>
+    <p style="color:#555;">That was <strong>{elapsed_seconds} seconds</strong>.</p>
+    <p style="color:#555;">The filter has not been cleaned in {elapsed_seconds} seconds.
+    It takes longer than that to find the washing machine.</p>
+    <p style="color:#555;">Go and do a proper job and come back when you've actually done it.
+    The link will still be there.</p>
+    <p style="color:#999;font-size:12px;margin-top:24px;">
+      The system is watching. It has timestamps.
+    </p>
+  </div>
 </body>
 </html>"""
 
