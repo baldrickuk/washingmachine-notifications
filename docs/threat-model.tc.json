@@ -309,10 +309,6 @@
         {
           "key": "Priority",
           "value": "High"
-        },
-        {
-          "key": "DREAD",
-          "value": "7.8"
         }
       ],
       "tags": [
@@ -343,10 +339,6 @@
         {
           "key": "Priority",
           "value": "High"
-        },
-        {
-          "key": "DREAD",
-          "value": "7.2"
         }
       ],
       "tags": [
@@ -377,10 +369,6 @@
         {
           "key": "Priority",
           "value": "High"
-        },
-        {
-          "key": "DREAD",
-          "value": "6.6"
         }
       ],
       "tags": [
@@ -411,10 +399,6 @@
         {
           "key": "Priority",
           "value": "High"
-        },
-        {
-          "key": "DREAD",
-          "value": "6.4"
         }
       ],
       "tags": [
@@ -445,10 +429,6 @@
         {
           "key": "Priority",
           "value": "High"
-        },
-        {
-          "key": "DREAD",
-          "value": "6.2"
         }
       ],
       "tags": [
@@ -479,10 +459,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "5.8"
         }
       ],
       "tags": [
@@ -512,10 +488,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "5.8"
         }
       ],
       "tags": [
@@ -544,10 +516,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "4.4"
         }
       ],
       "tags": [
@@ -576,10 +544,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "4.4"
         }
       ],
       "tags": [
@@ -610,10 +574,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "4.2"
         }
       ],
       "tags": [
@@ -645,10 +605,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "4.2"
         }
       ],
       "tags": [
@@ -678,10 +634,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "4.2"
         }
       ],
       "tags": [
@@ -712,10 +664,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "4.2"
         }
       ],
       "tags": [
@@ -745,10 +693,6 @@
         {
           "key": "Priority",
           "value": "Medium"
-        },
-        {
-          "key": "DREAD",
-          "value": "4.2"
         }
       ],
       "tags": [
@@ -778,10 +722,6 @@
         {
           "key": "Priority",
           "value": "Low"
-        },
-        {
-          "key": "DREAD",
-          "value": "3.4"
         }
       ],
       "tags": [
@@ -810,10 +750,6 @@
         {
           "key": "Priority",
           "value": "Low"
-        },
-        {
-          "key": "DREAD",
-          "value": "3.4"
         }
       ],
       "tags": [
@@ -842,10 +778,6 @@
         {
           "key": "Priority",
           "value": "Low"
-        },
-        {
-          "key": "DREAD",
-          "value": "3.2"
         }
       ],
       "tags": [
@@ -876,10 +808,6 @@
         {
           "key": "Priority",
           "value": "Low"
-        },
-        {
-          "key": "DREAD",
-          "value": "3.0"
         }
       ],
       "tags": [
@@ -908,10 +836,6 @@
         {
           "key": "Priority",
           "value": "Low"
-        },
-        {
-          "key": "DREAD",
-          "value": "3.0"
         }
       ],
       "tags": [
