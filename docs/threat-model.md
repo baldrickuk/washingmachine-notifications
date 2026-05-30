@@ -1,7 +1,7 @@
 # Threat Model — washingmachine-notifications
 
 > Security artefact produced by structured threat modelling (STRIDE + DREAD + MITRE ATT&CK Cloud Matrix).
-> Version 2.0 — supersedes the v1.3 model. The v1.3 model described a SAM/CloudFormation +
+> Version 2.0 — supersedes the v1.3 model. The v1.3 model described a CloudFormation +
 > Secrets Manager + Twilio architecture that **no longer matches the deployed code**. The system
 > is now Terraform/OpenTofu, uses **SSM Parameter Store (SecureString)** for secrets/PII, and
 > **Pushover** as the optional push channel. This model is grounded in the actual `src/` and
@@ -447,8 +447,7 @@ score. Priority: CRITICAL ≥8.0, HIGH 6.0–7.9, MEDIUM 4.0–5.9, LOW <4.0.
 
 **Assumptions**
 - AWS account root has MFA; administrative IAM is tightly controlled and out of scope.
-- `terraform.tfvars` and `samconfig.toml` are gitignored and never committed (note: the repo's
-  README/tests still reference SAM, but the live IaC is Terraform — see ambiguity below).
+- `terraform.tfvars` is gitignored and never committed.
 - A separate organisation/account CloudTrail captures management events (the app trail logs only
   DynamoDB **data** events).
 - SES is or will be in production sending mode (per README), widening T04 impact.

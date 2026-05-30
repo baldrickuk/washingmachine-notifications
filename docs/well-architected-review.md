@@ -93,12 +93,12 @@ flowchart LR
 | OE-2 | **No dead letter queue (DLQ)** — EventBridge invokes Lambdas asynchronously. After 2 retries, failed events are silently discarded | ✅ ~~High~~ | Resolved — SQS DLQ attached to `SendWeeklyEmail` and `SendDailySMS`. CloudWatch alarm fires on any message in the queue. |
 | OE-3 | **Unstructured logging** — `print()` producing plain text | ✅ ~~Medium~~ | Resolved — `_log()` emits structured JSON to CloudWatch. Fields: `level`, `message`, plus contextual keys. Queryable in CloudWatch Insights. |
 | OE-4 | **No automated tests** — no unit or integration tests exist | ✅ ~~Medium~~ | Resolved — 42 pytest unit tests across all four handlers and all pure functions. Mock-based, no real AWS calls. Runs in 0.06s. |
-| OE-5 | **No CI/CD pipeline** — deployment is a manual `sam deploy` | ✅ ~~Medium~~ | Resolved — GitHub Actions CI: pylint → pytest → `tofu validate` on every push and PR. Commented deploy job with OIDC setup instructions included. |
+| OE-5 | **No CI/CD pipeline** — deployment was manual | ✅ ~~Medium~~ | Resolved — GitHub Actions CI: pylint → pytest → `tofu validate` on every push and PR. Commented deploy job with OIDC setup instructions included. |
 | OE-6 | **No CloudWatch dashboard** — no single pane of glass for operational health | ✅ ~~Low~~ | Resolved — 8-widget dashboard covering Lambda invocations, errors, p99 duration, DynamoDB requests, API Gateway requests + 4xx, SQS DLQ depth, Lambda throttles, and concurrent executions. |
 
 ### Best Practices Met
 
-- ✅ **OPS 1** — Workload is defined as code (SAM template)
+- ✅ **OPS 1** — Workload is defined as code (Terraform / OpenTofu)
 - ✅ **OPS 5** — Test mode enables safe experimentation without production impact
 - ✅ **OPS 6** — DynamoDB TTL automates data lifecycle management
 - ✅ **OPS 8** — Documentation maintained alongside code in the same repository
@@ -164,7 +164,7 @@ sequenceDiagram
 | REL-1 | **No dead letter queue** — async Lambda failures are silently discarded after 2 retries | ✅ ~~High~~ | Resolved — SQS DLQ attached to both scheduled functions. Messages retained for 14 days. |
 | REL-2 | **No failure alerting** — Lambda errors produce no notification | ✅ ~~High~~ | Resolved — CloudWatch alarms on Lambda `Errors` metric, DLQ depth, and API Gateway 4xx throttling. All alert via SNS to `AlertEmail`. |
 | REL-3 | **No post-deploy verification** — no automated check that Sunday's email was actually sent | ✅ ~~Medium~~ | Resolved — `verify_delivery` Lambda runs Monday 09:01 UK. Checks DynamoDB for last Sunday's record; publishes to AlertTopic if missing. |
-| REL-4 | **Single region** — `eu-west-2` only | 🟢 Low | Accepted for this risk profile. Recovery is a `sam deploy` to another region. |
+| REL-4 | **Single region** — `eu-west-2` only | 🟢 Low | Accepted for this risk profile. Recovery is a `tofu apply` to another region. |
 
 ### Best Practices Met
 
