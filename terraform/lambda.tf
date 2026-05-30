@@ -24,7 +24,6 @@ locals {
 
 locals {
   lambda_defaults = {
-    role          = aws_iam_role.lambda.arn
     filename      = local.lambda_zip
     runtime       = "python3.12"
     architectures = ["arm64"]
@@ -39,7 +38,7 @@ locals {
 
 resource "aws_lambda_function" "send_weekly_email" {
   function_name    = "${var.stack_name}-send-weekly-email"
-  role             = local.lambda_defaults.role
+  role             = aws_iam_role.send_weekly_email.arn
   filename         = local.lambda_defaults.filename
   source_code_hash = local.lambda_source_hash
   runtime          = local.lambda_defaults.runtime
@@ -67,7 +66,7 @@ resource "aws_lambda_function" "send_weekly_email" {
 
 resource "aws_lambda_function" "send_daily_sms" {
   function_name    = "${var.stack_name}-send-daily-sms"
-  role             = local.lambda_defaults.role
+  role             = aws_iam_role.send_daily_sms.arn
   filename         = local.lambda_defaults.filename
   source_code_hash = local.lambda_source_hash
   runtime          = local.lambda_defaults.runtime
@@ -93,7 +92,7 @@ resource "aws_lambda_function" "send_daily_sms" {
 
 resource "aws_lambda_function" "confirm_task" {
   function_name                  = "${var.stack_name}-confirm-task"
-  role                           = local.lambda_defaults.role
+  role                           = aws_iam_role.confirm_task.arn
   filename                       = local.lambda_defaults.filename
   source_code_hash               = local.lambda_source_hash
   runtime                        = local.lambda_defaults.runtime
@@ -116,7 +115,7 @@ resource "aws_lambda_function" "confirm_task" {
 
 resource "aws_lambda_function" "verify_delivery" {
   function_name    = "${var.stack_name}-verify-delivery"
-  role             = local.lambda_defaults.role
+  role             = aws_iam_role.verify_delivery.arn
   filename         = local.lambda_defaults.filename
   source_code_hash = local.lambda_source_hash
   runtime          = local.lambda_defaults.runtime
