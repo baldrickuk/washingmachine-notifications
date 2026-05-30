@@ -48,6 +48,18 @@ resource "aws_ssm_parameter" "pushover_user_key" {
   }
 }
 
+resource "aws_ssm_parameter" "origin_verify_token" {
+  count = var.origin_verify_token != "" ? 1 : 0
+
+  name  = "/${var.stack_name}/origin_verify_token"
+  type  = "SecureString"
+  value = var.origin_verify_token
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 resource "aws_ssm_parameter" "wife_email" {
   name  = "/${var.stack_name}/wife_email"
   type  = "SecureString"

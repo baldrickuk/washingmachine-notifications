@@ -7,6 +7,11 @@ resource "aws_cloudfront_distribution" "confirm" {
     origin_id   = "ApiGatewayOrigin"
     domain_name = "${aws_apigatewayv2_api.confirm.id}.execute-api.${var.aws_region}.amazonaws.com"
 
+    custom_header {
+      name  = "X-Origin-Verify"
+      value = var.origin_verify_token
+    }
+
     custom_origin_config {
       http_port              = 80
       https_port             = 443
